@@ -1,5 +1,6 @@
 #include <Windows.h>
 #include <cstddef>
+#include <charconv>
 
 #include "lib/Windows_Symbol.hpp"
 
@@ -7,6 +8,8 @@ void Print (const wchar_t * text);
 void Print (const wchar_t * text, std::size_t length);
 void InitPrint ();
 WORD GetConsoleColors ();
+void SetTextColor (WORD);
+void ResetTextColor ();
 
 HKEY hKey = NULL;
 HANDLE out = NULL;
@@ -17,7 +20,6 @@ DWORD minor = 0;
 DWORD build = 0;
 
 bool ShowBrandingFromAPI ();
-bool ShowBrandingFromRegistry ();
 void ShowVersionNumbers ();
 bool PrintValueFromRegistry (const wchar_t * value, const wchar_t * prefix = nullptr);
 
@@ -36,6 +38,8 @@ __declspec (noreturn) void main () {
     build &= 0x0FFF'FFFF;
     colors = GetConsoleColors ();
 
+    Print (L"\r\n");
+
     // Windows 11 Pro Insider Preview
     // Windows 10 Enterprise N 2016 LTSB
     // Windows Server 2022 Datacenter
@@ -43,7 +47,7 @@ __declspec (noreturn) void main () {
     // Azure Stack HCI
 
     if (major < 10 || !ShowBrandingFromAPI ()) {
-        if (!ShowBrandingFromRegistry ()) {
+        if (!PrintValueFromRegistry (L"ProductName")) {
             Print (L"Windows");
         }
     }
@@ -51,18 +55,23 @@ __declspec (noreturn) void main () {
     // [Version 22H2 Major.Minor.Build.UBR]
 
     Print (L" [Version "); // TODO: from rsrc
+    SetTextColor (15);
     if (PrintValueFromRegistry (L"DisplayVersion") || PrintValueFromRegistry (L"ReleaseId")) {
         Print (L" ");
     }
+    ResetTextColor ();
     ShowVersionNumbers ();
     PrintValueFromRegistry (L"CSDVersion", L" "); // TODO: prefer GetVersionEx?
     Print (L"]");
 
-    // TODO: company and user
+    /*Print (L"\r\n\r\nLicensed to:"); // TODO: show only if both
+    PrintValueFromRegistry (L"RegisteredOwner", L"\r\n    ");
+    PrintValueFromRegistry (L"RegisteredOrganization", L"\r\n    ");
+    // */
+
     // TODO: licensing and expiration status
     // TODO: ?? memory and OS bitness (3GT)
     // TODO: ?? processors and levels, architectures, SSE,AVX,etc...
-    // TODO: ?? nics?
 
     // RegCloseKey (hKey);
     Print (L"\r\n");
@@ -90,37 +99,47 @@ bool PrintValueFromRegistry (const wchar_t * value, const wchar_t * prefix) {
         wchar_t text [512];
         DWORD size = sizeof text;
         if (RegQueryValueEx (hKey, value, NULL, NULL, (LPBYTE) text, &size) == ERROR_SUCCESS) {
-            if (prefix) {
-                Print (prefix);
+            if (size > sizeof (wchar_t)) {
+                if (prefix) {
+                    Print (prefix);
+                }
+                Print (text, size / sizeof (wchar_t) - 1);
             }
-            Print (text, size / sizeof (wchar_t) - 1);
             return true;
         }
     }
     return false;
 }
 
-bool ShowBrandingFromRegistry () {
-    return PrintValueFromRegistry (L"ProductName");
+void PrintNumber (DWORD number, int base = 10) {
+    char a [24];
+
+    if (auto [end, error] = std::to_chars (&a [0], &a [sizeof a], number, base); error == std::errc ()) {
+        auto n = end - a;
+        wchar_t w [24];
+        for (std::size_t i = 0; i != n; ++i) {
+            w [i] = a [i];
+        }
+        Print (w, n);
+    }
 }
 
 void ShowVersionNumbers () {
-    wchar_t string [24];
-
     if (major == 10 && minor == 0) {
-        // gray color
+        SetTextColor (8);
     }
-    auto length = wsprintf (string, L"%u.%u", major, minor);
-    Print (string, length);
-
-    length = wsprintf (string, L".%u", build);
-    Print (string, length);
+    PrintNumber (major);
+    Print (L".");
+    PrintNumber (minor);
+    Print (L".");
+    ResetTextColor ();
+    PrintNumber (build);
 
     DWORD UBR = 0;
     DWORD size = sizeof UBR;
     if (RegQueryValueEx (hKey, L"UBR", NULL, NULL, (LPBYTE) &UBR, &size) == ERROR_SUCCESS) {
-        length = wsprintf (string, L".%u", UBR);
-        Print (string, length);
+        Print (L".");
+        PrintNumber (UBR);
     }
 }
 
@@ -184,10 +203,15 @@ WORD GetConsoleColors () {
     }
     return 0;
 }
-void SetConsoleColors (WORD attr) {
-    if (!file) {
-        SetConsoleTextAttribute (out, attr);
+void SetTextColor (WORD fg) {
+    fg &= 0x000F;
+    fg |= (colors & 0xFFF0);
+    if (fg != colors && !file) {
+        SetConsoleTextAttribute (out, fg);
     }
 }
-
-
+void ResetTextColor () {
+    if (!file) {
+        SetConsoleTextAttribute (out, colors);
+    }
+}

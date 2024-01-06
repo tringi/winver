@@ -6,6 +6,6 @@ EXPORTS
 	wcscpy
 	wcschr
 	wcsncpy
-	_wassert
 	memset
 	memcpy
+	memmove
