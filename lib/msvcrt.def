@@ -1,0 +1,11 @@
+EXPORTS 
+	_snwprintf
+	_snprintf
+	wcslen
+	wcscmp
+	wcscpy
+	wcschr
+	wcsncpy
+	_wassert
+	memset
+	memcpy
