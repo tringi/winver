@@ -42,7 +42,7 @@ __declspec (noreturn) void main () {
     // Hyper-V Server
     // Azure Stack HCI
 
-    if (major >= 10 || !ShowBrandingFromAPI ()) {
+    if (major < 10 || !ShowBrandingFromAPI ()) {
         if (!ShowBrandingFromRegistry ()) {
             Print (L"Windows");
         }
