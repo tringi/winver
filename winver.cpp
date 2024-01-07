@@ -69,9 +69,11 @@ __declspec (noreturn) void main () {
     PrintValueFromRegistry (L"RegisteredOrganization", L"\r\n    ");
     // */
 
+    // TODO: hypervisor info?
     // TODO: licensing and expiration status
-    // TODO: ?? memory and OS bitness (3GT)
+    // TODO: ?? memory size and OS bitness (3GT)
     // TODO: ?? processors and levels, architectures, SSE,AVX,etc...
+    // TODO: ?? supported architectures?
 
     // RegCloseKey (hKey);
     Print (L"\r\n");
