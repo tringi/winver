@@ -64,7 +64,8 @@ __declspec (noreturn) void main () {
     PrintValueFromRegistry (L"CSDVersion", L" "); // TODO: prefer GetVersionEx?
     Print (L"]");
 
-    /*Print (L"\r\n\r\nLicensed to:"); // TODO: show only if both
+    // TODO: hide further info behing command-line parameters?
+    /*Print (L"\r\n\r\nLicensed to:"); // TODO: show if at least one
     PrintValueFromRegistry (L"RegisteredOwner", L"\r\n    ");
     PrintValueFromRegistry (L"RegisteredOrganization", L"\r\n    ");
     // */

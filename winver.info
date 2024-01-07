@@ -14,7 +14,7 @@
 	major = 0
 	minor = 2
 	patch = 0
-	build = 148
+	build = 154
 
 [versioninfo]
 	filename	= %dir%\%internalname%-vi.rc
@@ -50,8 +50,7 @@
 	assemblyIdentityName	= TRIMCORE.WinVer.%filename%
 	assemblyDescription	= %filedescription%
 
-;;	requestedExecutionLevel	= asInvoker
-;;	longPathAware	= True
+	activeCodePage	= UTF-8
 
 	supportedOS:1	= e2011457-1546-43c5-a5fe-008deee3d3f0
 	supportedOS:2	= 35138b9a-5d96-4fbd-8e2d-a2440225f93a
