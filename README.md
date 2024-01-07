@@ -9,11 +9,17 @@ Pick a proper version from `bin` directory and place it on shared dive or thumb 
 or any place you access from PC you wish to query.
 Or include it in your deployment tools to have it on all your machines.
 
-On my compute I see:
+On my computer I see:
 
     C:\>Projects\winver\bin\x64\Release\winver.com
     
     Windows 10 Enterprise N 2016 LTSB [Version 1607 10.0.14393.6529]
+
+While regular `ver` shows just this bland:
+
+    C:\>ver
+    
+    Microsoft Windows [Version 10.0.14393.6529]
 
 ## Other examples from my random VMs
 
