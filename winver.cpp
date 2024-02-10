@@ -9,7 +9,8 @@ void Print (wchar_t c);
 void Print (const wchar_t * text);
 void Print (const wchar_t * text, std::size_t length);
 void PrintRsrc (unsigned int);
-void PrintNumber (DWORD number, int base = 10);
+void PrintNumber (DWORD number, int base, std::size_t digits);
+void PrintNumber (DWORD number) { PrintNumber (number, 10, 0); };
 void InitPrint ();
 void InitArguments ();
 UCHAR GetConsoleColors ();
@@ -24,7 +25,7 @@ UCHAR colors = 0;
 DWORD major = 0;
 DWORD minor = 0;
 DWORD build = 0;
-const wchar_t * args = nullptr;
+std::wstring_view args;
 
 bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
@@ -48,8 +49,7 @@ __declspec (noreturn) void main () {
     build &= 0x0FFF'FFFF;
     colors = GetConsoleColors ();
 
-    Print (L'\r');
-    Print (L'\n');
+    Print (L"\r\n");
     
     // Windows 11 Pro Insider Preview
     // Windows 10 Enterprise N 2016 LTSB
@@ -65,8 +65,7 @@ __declspec (noreturn) void main () {
 
     // [Version 22H2 Major.Minor.Build.UBR]
 
-    Print (L' ');
-    Print (L'[');
+    Print (L" [");
     PrintRsrc (2);
     SetTextColor (15);
     if (PrintValueFromRegistry (L"DisplayVersion") || PrintValueFromRegistry (L"ReleaseId")) {
@@ -75,10 +74,64 @@ __declspec (noreturn) void main () {
     ResetTextColor ();
     ShowVersionNumbers ();
     PrintValueFromRegistry (L"CSDVersion", L" "); // TODO: prefer GetVersionEx?
-    Print (L']');
+    Print (L"]\r\n");
 
-    if (IsOptionPresent (L'a') || IsOptionPresent (L'o')) {
+    if (IsOptionPresent (L'b')) {
+        SetTextColor (8);
+        if (PrintValueFromRegistry (L"BuildLabEx") || PrintValueFromRegistry (L"BuildLab")) {
+            Print (L"\r\n");
+        }
+        ResetTextColor ();
+    }
+
+    if (IsOptionPresent (L'o')) {
         PrintUserInformation ();
+    }
+
+    if (IsOptionPresent (L'u')) {
+        ULONGLONG t = 0;
+        ULONGLONG (WINAPI * ptrGetTickCount64) () = NULL;
+        if (Windows::Symbol (GetModuleHandle (L"KERNEL32"), ptrGetTickCount64, "GetTickCount64")) {
+            t = ptrGetTickCount64 ();
+        } else {
+            t = GetTickCount ();
+        }
+
+        t /= 1000u;
+        auto ss = t % 60u;
+        t /= 60u;
+        auto mm = t % 60u;
+        t /= 60u;
+        auto hh = t % 24u;
+        t /= 24u;
+        auto dd = t % 365u;
+        t /= 365u;
+
+        PrintRsrc (5);
+        if (t) {
+            PrintNumber (t);
+            PrintRsrc (6); // y
+        }
+        if (dd) {
+            PrintNumber (dd);
+            PrintRsrc (7); // d
+        }
+        PrintNumber (hh, 10, 2);
+        Print (L':');
+        PrintNumber (mm, 10, 2);
+        Print (L':');
+        PrintNumber (ss, 10, 2);
+        Print (L"\r\n");
+    }
+
+    if (IsOptionPresent (L'c')) {
+        // CPUID, arch, SSE,AVX,etc...
+    }
+
+    if (IsOptionPresent (L'm')) {
+        // 32b/3GT/44b/48b/57b
+        // 32 GB of Physical Memory
+        // 8 GB of Hyper-V Maximum Assigned Memory
     }
 
     // TODO: hypervisor info?
@@ -86,10 +139,9 @@ __declspec (noreturn) void main () {
     // TODO: ?? memory size and OS bitness (3GT)
     // TODO: ?? processors and levels, architectures, SSE,AVX,etc...
     // TODO: ?? supported architectures?
+    // TODO: ?? disk size and free space
 
     // RegCloseKey (hKey);
-    Print (L'\r');
-    Print (L'\n');
     ExitProcess (0);
 }
 
@@ -137,29 +189,41 @@ void PrintUserInformation () {
         auto have_organization = (RegQueryValueEx (hKey, L"RegisteredOrganization", NULL, NULL, (LPBYTE) organization, &organization_size) == ERROR_SUCCESS) && (organization_size > sizeof (wchar_t));
 
         if (have_owner || have_organization) {
+            SetTextColor (11);
             PrintRsrc (3);
+            ResetTextColor ();
             if (have_owner) {
                 PrintRsrc (4);
                 Print (owner, owner_size / sizeof (wchar_t));
+                Print (L"\r\n");
             }
             if (have_organization) {
                 PrintRsrc (4);
                 Print (organization, organization_size / sizeof (wchar_t));
+                Print (L"\r\n");
             }
         }
     }
 }
 
-void PrintNumber (DWORD number, int base) {
-    char a [24];
+void PrintNumber (DWORD number, int base, std::size_t digits) {
+    char a [32u];
 
     if (auto [end, error] = std::to_chars (&a [0], &a [sizeof a], number, base); error == std::errc ()) {
         auto n = end - a;
-        wchar_t w [24];
-        for (std::size_t i = 0; i != n; ++i) {
-            w [i] = a [i];
+        auto prefix = (digits > n) ? (digits - n) : 0;
+        if (prefix + n > sizeof a) {
+            prefix = sizeof a - n;
         }
-        Print (w, n);
+
+        wchar_t w [sizeof a];
+        for (std::size_t i = 0; i != prefix; ++i) {
+            w [i] = L'0';
+        }
+        for (std::size_t i = 0; i != n; ++i) {
+            w [i + prefix] = a [i];
+        }
+        Print (w, n + prefix);
     }
 }
 
@@ -276,13 +340,10 @@ void InitArguments () {
     cmdline.remove_prefix (cmdline.find_last_of (L'"') + 1); // skip until last quote, if any
     if (auto argoffset = cmdline.rfind (L" -") + 1) { // any arguments?
         cmdline.remove_prefix (argoffset + 1);
-        if (!cmdline.empty ()) {
-            args = cmdline.data ();
-        }
+        args = cmdline;
     }
 }
 
 bool IsOptionPresent (wchar_t c) {
-    return args != nullptr
-        && std::wstring_view (args).contains (c);
+    return args.contains (c) || args.contains (L'a');
 }
