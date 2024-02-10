@@ -20,6 +20,7 @@ bool IsOptionPresent (wchar_t c);
 
 HKEY hKey = NULL;
 HANDLE out = NULL;
+HMODULE hKernel32 = NULL;
 bool  file = false;
 UCHAR colors = 0;
 DWORD major = 0;
@@ -31,6 +32,7 @@ bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
 bool PrintValueFromRegistry (const wchar_t * value, const wchar_t * prefix = nullptr);
 void PrintUserInformation ();
+void PrintOsArchitecture ();
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NTDLL
@@ -48,6 +50,7 @@ __declspec (noreturn) void main () {
 
     build &= 0x0FFF'FFFF;
     colors = GetConsoleColors ();
+    hKernel32 = GetModuleHandle (L"KERNEL32");
 
     Print (L"\r\n");
     
@@ -74,7 +77,17 @@ __declspec (noreturn) void main () {
     ResetTextColor ();
     ShowVersionNumbers ();
     PrintValueFromRegistry (L"CSDVersion", L" "); // TODO: prefer GetVersionEx?
-    Print (L"]\r\n");
+
+#ifdef _M_ARM64
+    Print (L"] ARM-64\r\n");
+#else
+    Print (L"] ");
+    PrintOsArchitecture ();
+    Print (L"\r\n");
+#endif
+
+    // winver.com -b
+    //  - 14393.6611.amd64fre.rs1_release.231218-1733
 
     if (IsOptionPresent (L'b')) {
         SetTextColor (8);
@@ -84,9 +97,15 @@ __declspec (noreturn) void main () {
         ResetTextColor ();
     }
 
+    // winver.com -o
+    //  - Licensed to: \n User name \n Company name
+
     if (IsOptionPresent (L'o')) {
         PrintUserInformation ();
     }
+
+    // winver.com -u
+    //  - Uptime: 1y 123d 23:02:59
 
     if (IsOptionPresent (L'u')) {
 #ifdef _M_ARM64
@@ -94,7 +113,7 @@ __declspec (noreturn) void main () {
 #else
         ULONGLONG t = 0;
         ULONGLONG (WINAPI * ptrGetTickCount64) () = NULL;
-        if (Windows::Symbol (GetModuleHandle (L"KERNEL32"), ptrGetTickCount64, "GetTickCount64")) {
+        if (Windows::Symbol (hKernel32, ptrGetTickCount64, "GetTickCount64")) {
             t = ptrGetTickCount64 ();
         } else {
             t = GetTickCount ();
@@ -281,6 +300,46 @@ void ShowVersionNumbers () {
         }
     }
 }
+
+#ifndef _M_ARM64
+void PrintOsArchitecture () {
+    BOOL (WINAPI * ptrIsWow64Process2) (HANDLE, USHORT *, USHORT *) = NULL;
+    if (Windows::Symbol (hKernel32, ptrIsWow64Process2, "IsWow64Process2")) {
+        USHORT process = 0;
+        USHORT native = 0;
+
+        if (ptrIsWow64Process2 ((HANDLE) -1, &process, &native)) {
+            switch (native) {
+                default:
+#ifndef _WIN64                
+                case IMAGE_FILE_MACHINE_I386:
+                    Print (L"32-bit");
+                    break;
+#endif
+                case IMAGE_FILE_MACHINE_AMD64:
+                    Print (L"64-bit");
+                    break;
+                case IMAGE_FILE_MACHINE_ARM64:
+                    Print (L"ARM-64");
+                    break;
+            }
+            return;
+        }
+    }
+
+#ifdef _WIN64
+    Print (L"64-bit");
+#else
+    BOOL wow = FALSE;
+    if (IsWow64Process ((HANDLE) -1, &wow) && wow) {
+        Print (L"64-bit");
+        return;
+    }
+
+    Print (L"32-bit");
+#endif
+}
+#endif
 
 void InitPrint () {
 
