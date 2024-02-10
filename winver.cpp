@@ -253,6 +253,10 @@ void ShowVersionNumbers () {
                 }
                 Print (pUBR);
             }
+        } else
+        if (RegQueryValueEx (hKey, L"CSDBuildNumber", NULL, NULL, (LPBYTE) text, &size) == ERROR_SUCCESS) {
+            Print (L'.');
+            Print (text);
         }
     }
 }
