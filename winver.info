@@ -14,7 +14,7 @@
 	major = 0
 	minor = 3
 	patch = 0
-	build = 237
+	build = 249
 
 [versioninfo]
 	filename	= %dir%\%internalname%-vi.rc
@@ -26,15 +26,14 @@
 	productversion	= %major%,%minor%,%patch%,%build%
 
 [versioninfo:values]
-	InternalName	= %internalname%
-	OriginalFilename= %filename%
-	CompanyName	= %companyname%
+;;	InternalName	= %internalname%
+	OriginalFilename= %internalname%.com
+;;	CompanyName	= %companyname%
 	LegalCopyright	= © %YEAR% %companyname%
 	FileVersion	= %major%.%minor%.%patch%.%build%
 	FileDescription	= %filedescription%
 	ProductName	= %product%
-	ProductVersion	= %major%.%minor%.%patch%
-	URL		= http://www.trimcore.cz
+	ProductVersion	= %major%.%minor%
 
 [versioninfo:ff]
 	debug		= %debug%
@@ -47,7 +46,7 @@
 	architecture	= %platform%
 
 	assemblyVersion		= %major%.%minor%.%patch%.%build%
-	assemblyIdentityName	= TRIMCORE.WinVer.%filename%
+	assemblyIdentityName	= TRIMCORE.WinVer
 	assemblyDescription	= %filedescription%
 
 	activeCodePage	= UTF-8

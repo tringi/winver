@@ -89,6 +89,9 @@ __declspec (noreturn) void main () {
     }
 
     if (IsOptionPresent (L'u')) {
+#ifdef _M_ARM64
+        ULONGLONG t = GetTickCount64 ();
+#else
         ULONGLONG t = 0;
         ULONGLONG (WINAPI * ptrGetTickCount64) () = NULL;
         if (Windows::Symbol (GetModuleHandle (L"KERNEL32"), ptrGetTickCount64, "GetTickCount64")) {
@@ -97,6 +100,7 @@ __declspec (noreturn) void main () {
             t = GetTickCount ();
         }
 
+#endif
         t /= 1000u;
         auto ss = t % 60u;
         t /= 60u;
@@ -161,16 +165,43 @@ bool ShowBrandingFromAPI () {
     return result;
 }
 
+std::size_t GetRegistryString (const wchar_t * value, wchar_t * buffer, std::size_t length) {
+    if (hKey) {
+        DWORD size = length * sizeof (wchar_t);
+        DWORD type = 0;
+        if (RegQueryValueEx (hKey, value, NULL, &type, (LPBYTE) buffer, &size) == ERROR_SUCCESS) {
+            switch (type) {
+                case REG_SZ:
+                    if (size > sizeof (wchar_t))
+                        return size / sizeof (wchar_t);
+            }
+        }
+    }
+    return false;
+}
+
 bool PrintValueFromRegistry (const wchar_t * value, const wchar_t * prefix) {
     if (hKey) {
         wchar_t text [512];
         DWORD size = sizeof text;
-        if (RegQueryValueEx (hKey, value, NULL, NULL, (LPBYTE) text, &size) == ERROR_SUCCESS) {
-            if (size > sizeof (wchar_t)) {
-                if (prefix) {
-                    Print (prefix);
-                }
-                Print (text, size / sizeof (wchar_t) - 1);
+        DWORD type = 0;
+        if (RegQueryValueEx (hKey, value, NULL, &type, (LPBYTE) text, &size) == ERROR_SUCCESS) {
+            switch (type) {
+                case REG_DWORD:
+                case REG_QWORD:
+                    if (prefix) {
+                        Print (prefix);
+                    }
+                    PrintNumber (*(DWORD *) text);
+                    break;
+
+                case REG_SZ:
+                    if (size > sizeof (wchar_t)) {
+                        if (prefix) {
+                            Print (prefix);
+                        }
+                        Print (text, size / sizeof (wchar_t) - 1);
+                    }
             }
             return true;
         }
@@ -183,23 +214,21 @@ void PrintUserInformation () {
         wchar_t owner [512];
         wchar_t organization [512];
 
-        DWORD owner_size = sizeof owner;
-        DWORD organization_size = sizeof organization;
-        auto have_owner = (RegQueryValueEx (hKey, L"RegisteredOwner", NULL, NULL, (LPBYTE) owner, &owner_size) == ERROR_SUCCESS) && (owner_size > sizeof (wchar_t));
-        auto have_organization = (RegQueryValueEx (hKey, L"RegisteredOrganization", NULL, NULL, (LPBYTE) organization, &organization_size) == ERROR_SUCCESS) && (organization_size > sizeof (wchar_t));
+        auto nowner = GetRegistryString (L"RegisteredOwner", owner, 512);
+        auto norganization = GetRegistryString (L"RegisteredOrganization", organization, 512);
 
-        if (have_owner || have_organization) {
+        if (nowner + norganization) {
             SetTextColor (11);
             PrintRsrc (3);
             ResetTextColor ();
-            if (have_owner) {
+            if (nowner) {
                 PrintRsrc (4);
-                Print (owner, owner_size / sizeof (wchar_t));
+                Print (owner, nowner);
                 Print (L"\r\n");
             }
-            if (have_organization) {
+            if (norganization) {
                 PrintRsrc (4);
-                Print (organization, organization_size / sizeof (wchar_t));
+                Print (organization, norganization);
                 Print (L"\r\n");
             }
         }
@@ -238,25 +267,17 @@ void ShowVersionNumbers () {
     ResetTextColor ();
     PrintNumber (build);
 
-    DWORD UBR = 0;
-    DWORD size = sizeof UBR;
-    if (RegQueryValueEx (hKey, L"UBR", NULL, NULL, (LPBYTE) &UBR, &size) == ERROR_SUCCESS) {
-        Print (L'.');
-        PrintNumber (UBR);
-    } else {
+    if (!PrintValueFromRegistry (L"UBR", L".")) {
         wchar_t text [128];
-        DWORD size = sizeof text;
-        if (RegQueryValueEx (hKey, L"BuildLabEx", NULL, NULL, (LPBYTE) text, &size) == ERROR_SUCCESS) {
+        if (GetRegistryString (L"BuildLabEx", text, 128)) {
             if (auto pUBR = std::wcschr (text, L'.')) {
                 if (auto pUBRend = std::wcschr (pUBR + 1, L'.')) {
                     *pUBRend = L'\0';
                 }
                 Print (pUBR);
             }
-        } else
-        if (RegQueryValueEx (hKey, L"CSDBuildNumber", NULL, NULL, (LPBYTE) text, &size) == ERROR_SUCCESS) {
-            Print (L'.');
-            Print (text);
+        } else {
+            PrintValueFromRegistry (L"CSDBuildNumber", L".");
         }
     }
 }
