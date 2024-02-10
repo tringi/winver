@@ -243,6 +243,17 @@ void ShowVersionNumbers () {
     if (RegQueryValueEx (hKey, L"UBR", NULL, NULL, (LPBYTE) &UBR, &size) == ERROR_SUCCESS) {
         Print (L'.');
         PrintNumber (UBR);
+    } else {
+        wchar_t text [128];
+        DWORD size = sizeof text;
+        if (RegQueryValueEx (hKey, L"BuildLabEx", NULL, NULL, (LPBYTE) text, &size) == ERROR_SUCCESS) {
+            if (auto pUBR = std::wcschr (text, L'.')) {
+                if (auto pUBRend = std::wcschr (pUBR + 1, L'.')) {
+                    *pUBRend = L'\0';
+                }
+                Print (pUBR);
+            }
+        }
     }
 }
 
