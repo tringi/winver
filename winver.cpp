@@ -1,6 +1,7 @@
 #include <Windows.h>
 #include <cstddef>
 #include <charconv>
+#include <string_view>
 
 #include "lib/Windows_Symbol.hpp"
 
@@ -8,10 +9,13 @@ void Print (wchar_t c);
 void Print (const wchar_t * text);
 void Print (const wchar_t * text, std::size_t length);
 void PrintRsrc (unsigned int);
+void PrintNumber (DWORD number, int base = 10);
 void InitPrint ();
+void InitArguments ();
 UCHAR GetConsoleColors ();
 void SetTextColor (unsigned char);
 void ResetTextColor ();
+bool IsOptionPresent (wchar_t c);
 
 HKEY hKey = NULL;
 HANDLE out = NULL;
@@ -20,10 +24,12 @@ UCHAR colors = 0;
 DWORD major = 0;
 DWORD minor = 0;
 DWORD build = 0;
+const wchar_t * args = nullptr;
 
 bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
 bool PrintValueFromRegistry (const wchar_t * value, const wchar_t * prefix = nullptr);
+void PrintUserInformation ();
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NTDLL
@@ -35,6 +41,7 @@ __declspec(naked)
 #endif
 __declspec (noreturn) void main () {
     InitPrint ();
+    InitArguments ();
     RtlGetNtVersionNumbers (&major, &minor, &build);
     RegOpenKeyEx (HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_QUERY_VALUE, &hKey);
 
@@ -70,11 +77,9 @@ __declspec (noreturn) void main () {
     PrintValueFromRegistry (L"CSDVersion", L" "); // TODO: prefer GetVersionEx?
     Print (L']');
 
-    // TODO: hide further info behing command-line parameters?
-    /*Print (L"\r\n\r\nLicensed to:"); // TODO: show if at least one
-    PrintValueFromRegistry (L"RegisteredOwner", L"\r\n    ");
-    PrintValueFromRegistry (L"RegisteredOrganization", L"\r\n    ");
-    // */
+    if (IsOptionPresent (L'a') || IsOptionPresent (L'o')) {
+        PrintUserInformation ();
+    }
 
     // TODO: hypervisor info?
     // TODO: licensing and expiration status
@@ -121,7 +126,31 @@ bool PrintValueFromRegistry (const wchar_t * value, const wchar_t * prefix) {
     return false;
 }
 
-void PrintNumber (DWORD number, int base = 10) {
+void PrintUserInformation () {
+    if (hKey) {
+        wchar_t owner [512];
+        wchar_t organization [512];
+
+        DWORD owner_size = sizeof owner;
+        DWORD organization_size = sizeof organization;
+        auto have_owner = (RegQueryValueEx (hKey, L"RegisteredOwner", NULL, NULL, (LPBYTE) owner, &owner_size) == ERROR_SUCCESS) && (owner_size > sizeof (wchar_t));
+        auto have_organization = (RegQueryValueEx (hKey, L"RegisteredOrganization", NULL, NULL, (LPBYTE) organization, &organization_size) == ERROR_SUCCESS) && (organization_size > sizeof (wchar_t));
+
+        if (have_owner || have_organization) {
+            PrintRsrc (3);
+            if (have_owner) {
+                PrintRsrc (4);
+                Print (owner, owner_size / sizeof (wchar_t));
+            }
+            if (have_organization) {
+                PrintRsrc (4);
+                Print (organization, organization_size / sizeof (wchar_t));
+            }
+        }
+    }
+}
+
+void PrintNumber (DWORD number, int base) {
     char a [24];
 
     if (auto [end, error] = std::to_chars (&a [0], &a [sizeof a], number, base); error == std::errc ()) {
@@ -240,4 +269,20 @@ void ResetTextColor () {
     if (!file) {
         SetConsoleTextAttribute (out, colors);
     }
+}
+
+void InitArguments () {
+    std::wstring_view cmdline (GetCommandLine ());
+    cmdline.remove_prefix (cmdline.find_last_of (L'"') + 1); // skip until last quote, if any
+    if (auto argoffset = cmdline.rfind (L" -") + 1) { // any arguments?
+        cmdline.remove_prefix (argoffset + 1);
+        if (!cmdline.empty ()) {
+            args = cmdline.data ();
+        }
+    }
+}
+
+bool IsOptionPresent (wchar_t c) {
+    return args != nullptr
+        && std::wstring_view (args).contains (c);
 }
