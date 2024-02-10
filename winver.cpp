@@ -4,17 +4,19 @@
 
 #include "lib/Windows_Symbol.hpp"
 
+void Print (wchar_t c);
 void Print (const wchar_t * text);
 void Print (const wchar_t * text, std::size_t length);
+void PrintRsrc (unsigned int);
 void InitPrint ();
-WORD GetConsoleColors ();
-void SetTextColor (WORD);
+UCHAR GetConsoleColors ();
+void SetTextColor (unsigned char);
 void ResetTextColor ();
 
 HKEY hKey = NULL;
 HANDLE out = NULL;
 bool  file = false;
-WORD  colors = 0;
+UCHAR colors = 0;
 DWORD major = 0;
 DWORD minor = 0;
 DWORD build = 0;
@@ -23,6 +25,7 @@ bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
 bool PrintValueFromRegistry (const wchar_t * value, const wchar_t * prefix = nullptr);
 
+extern "C" IMAGE_DOS_HEADER __ImageBase;
 extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NTDLL
 
 // Entry Point
@@ -38,8 +41,9 @@ __declspec (noreturn) void main () {
     build &= 0x0FFF'FFFF;
     colors = GetConsoleColors ();
 
-    Print (L"\r\n");
-
+    Print (L'\r');
+    Print (L'\n');
+    
     // Windows 11 Pro Insider Preview
     // Windows 10 Enterprise N 2016 LTSB
     // Windows Server 2022 Datacenter
@@ -48,21 +52,23 @@ __declspec (noreturn) void main () {
 
     if (major < 10 || !ShowBrandingFromAPI ()) {
         if (!PrintValueFromRegistry (L"ProductName")) {
-            Print (L"Windows");
+            PrintRsrc (1);
         }
     }
 
     // [Version 22H2 Major.Minor.Build.UBR]
 
-    Print (L" [Version "); // TODO: from rsrc
+    Print (L' ');
+    Print (L'[');
+    PrintRsrc (2);
     SetTextColor (15);
     if (PrintValueFromRegistry (L"DisplayVersion") || PrintValueFromRegistry (L"ReleaseId")) {
-        Print (L" ");
+        Print (L' ');
     }
     ResetTextColor ();
     ShowVersionNumbers ();
     PrintValueFromRegistry (L"CSDVersion", L" "); // TODO: prefer GetVersionEx?
-    Print (L"]");
+    Print (L']');
 
     // TODO: hide further info behing command-line parameters?
     /*Print (L"\r\n\r\nLicensed to:"); // TODO: show if at least one
@@ -77,7 +83,8 @@ __declspec (noreturn) void main () {
     // TODO: ?? supported architectures?
 
     // RegCloseKey (hKey);
-    Print (L"\r\n");
+    Print (L'\r');
+    Print (L'\n');
     ExitProcess (0);
 }
 
@@ -132,16 +139,16 @@ void ShowVersionNumbers () {
         SetTextColor (8);
     }
     PrintNumber (major);
-    Print (L".");
+    Print (L'.');
     PrintNumber (minor);
-    Print (L".");
+    Print (L'.');
     ResetTextColor ();
     PrintNumber (build);
 
     DWORD UBR = 0;
     DWORD size = sizeof UBR;
     if (RegQueryValueEx (hKey, L"UBR", NULL, NULL, (LPBYTE) &UBR, &size) == ERROR_SUCCESS) {
-        Print (L".");
+        Print (L'.');
         PrintNumber (UBR);
     }
 }
@@ -168,7 +175,7 @@ void InitPrint () {
 
             [[ fallthrough ]]; // else serial/paralel port or printer, continue...
         default:
-        case FILE_DEVICE_UNKNOWN: // socket/tape
+        case FILE_TYPE_UNKNOWN: // socket/tape
         case FILE_TYPE_PIPE:
             file = true;
     }
@@ -196,21 +203,37 @@ void Print (const wchar_t * text, std::size_t length) {
 void Print (const wchar_t * text) {
     Print (text, wcslen (text));
 }
+void Print (wchar_t c) {
+    DWORD wtn;
+    if (file) {
+        WriteFile (out, &c, 1, &wtn, NULL);
+    } else {
+        WriteConsole (out, &c, 1, &wtn, NULL);
+    }
+}
+void PrintRsrc (unsigned int id) {
+    const wchar_t * string = nullptr;
+    if (auto length = LoadString (reinterpret_cast <HINSTANCE> (&__ImageBase), id, (LPWSTR) &string, 0)) {
+        Print (string, length);
+    }
+}
 
-WORD GetConsoleColors () {
+UCHAR GetConsoleColors () {
     if (!file) {
         CONSOLE_SCREEN_BUFFER_INFO info;
         if (GetConsoleScreenBufferInfo (out, &info)) {
-            return info.wAttributes;
+            return (UCHAR) info.wAttributes;
         }
     }
     return 0;
 }
-void SetTextColor (WORD fg) {
-    fg &= 0x000F;
-    fg |= (colors & 0xFFF0);
-    if (fg != colors && !file) {
-        SetConsoleTextAttribute (out, fg);
+void SetTextColor (unsigned char fg) {
+    if (!file) {
+        fg &= 0x0F;
+        fg |= (colors & 0xF0);
+        if (fg != colors) {
+            SetConsoleTextAttribute (out, fg);
+        }
     }
 }
 void ResetTextColor () {
