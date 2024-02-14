@@ -9,8 +9,10 @@ void Print (wchar_t c);
 void Print (const wchar_t * text);
 void Print (const wchar_t * text, std::size_t length);
 void PrintRsrc (unsigned int);
-void PrintNumber (DWORD number, int base, std::size_t digits);
-void PrintNumber (DWORD number) { PrintNumber (number, 10, 0); };
+template <typename T>
+void PrintNumber (T number, int base, int digits);
+template <typename T>
+void PrintNumber (T number) { PrintNumber (number, 10, 0); };
 void InitPrint ();
 void InitArguments ();
 UCHAR GetConsoleColors ();
@@ -39,9 +41,6 @@ extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NT
 
 // Entry Point
 
-#ifndef _WIN64
-__declspec(naked)
-#endif
 __declspec (noreturn) void main () {
     InitPrint ();
     InitArguments ();
@@ -121,18 +120,18 @@ __declspec (noreturn) void main () {
 
 #endif
         t /= 1000u;
-        auto ss = t % 60u;
+        DWORD ss = t % 60u;
         t /= 60u;
-        auto mm = t % 60u;
+        DWORD mm = t % 60u;
         t /= 60u;
-        auto hh = t % 24u;
+        DWORD hh = t % 24u;
         t /= 24u;
-        auto dd = t % 365u;
+        DWORD dd = t % 365u;
         t /= 365u;
 
         PrintRsrc (5);
         if (t) {
-            PrintNumber (t);
+            PrintNumber ((DWORD) t);
             PrintRsrc (6); // y
         }
         if (dd) {
@@ -254,8 +253,9 @@ void PrintUserInformation () {
     }
 }
 
-void PrintNumber (DWORD number, int base, std::size_t digits) {
-    char a [32u];
+template <typename T>
+void PrintNumber (T number, int base, int digits) {
+    char a [64u];
 
     if (auto [end, error] = std::to_chars (&a [0], &a [sizeof a], number, base); error == std::errc ()) {
         auto n = end - a;
