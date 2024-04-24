@@ -51,39 +51,44 @@ __declspec (noreturn) void main () {
     colors = GetConsoleColors ();
     hKernel32 = GetModuleHandle (L"KERNEL32");
 
-    Print (L"\r\n");
-    
-    // Windows 11 Pro Insider Preview
-    // Windows 10 Enterprise N 2016 LTSB
-    // Windows Server 2022 Datacenter
-    // Hyper-V Server
-    // Azure Stack HCI
+    // winver.com
+    // winver.com -a
 
-    if (major < 10 || !ShowBrandingFromAPI ()) {
-        if (!PrintValueFromRegistry (L"ProductName")) {
-            PrintRsrc (1);
+    if (args.empty () || args.contains (L'a')) {
+        Print (L"\r\n");
+
+        // Windows 11 Pro Insider Preview
+        // Windows 10 Enterprise N 2016 LTSB
+        // Windows Server 2022 Datacenter
+        // Hyper-V Server
+        // Azure Stack HCI
+
+        if (major < 10 || !ShowBrandingFromAPI ()) {
+            if (!PrintValueFromRegistry (L"ProductName")) {
+                PrintRsrc (1);
+            }
         }
-    }
 
-    // [Version 22H2 Major.Minor.Build.UBR]
+        // [Version 22H2 Major.Minor.Build.UBR]
 
-    Print (L" [");
-    PrintRsrc (2);
-    SetTextColor (15);
-    if (PrintValueFromRegistry (L"DisplayVersion") || PrintValueFromRegistry (L"ReleaseId")) {
-        Print (L' ');
-    }
-    ResetTextColor ();
-    ShowVersionNumbers ();
-    PrintValueFromRegistry (L"CSDVersion", L" "); // TODO: prefer GetVersionEx?
+        Print (L" [");
+        PrintRsrc (2);
+        SetTextColor (15);
+        if (PrintValueFromRegistry (L"DisplayVersion") || PrintValueFromRegistry (L"ReleaseId")) {
+            Print (L' ');
+        }
+        ResetTextColor ();
+        ShowVersionNumbers ();
+        PrintValueFromRegistry (L"CSDVersion", L" "); // TODO: prefer GetVersionEx?
 
 #ifdef _M_ARM64
-    Print (L"] ARM-64\r\n");
+        Print (L"] ARM-64\r\n");
 #else
-    Print (L"] ");
-    PrintOsArchitecture ();
-    Print (L"\r\n");
+        Print (L"] ");
+        PrintOsArchitecture ();
+        Print (L"\r\n");
 #endif
+    }
 
     // winver.com -b
     //  - 14393.6611.amd64fre.rs1_release.231218-1733
