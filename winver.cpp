@@ -8,6 +8,8 @@
 void Print (wchar_t c);
 void Print (const wchar_t * text);
 void Print (const wchar_t * text, std::size_t length);
+void Print (const char * text);
+void Print (const char * text, std::size_t length);
 void PrintRsrc (unsigned int);
 template <typename T>
 void PrintNumber (T number, int base, int digits);
@@ -19,6 +21,11 @@ UCHAR GetConsoleColors ();
 void SetTextColor (unsigned char);
 void ResetTextColor ();
 bool IsOptionPresent (wchar_t c);
+
+template <std::size_t N>
+std::size_t Convert (const char * in, wchar_t (&out) [N]) {
+    return MultiByteToWideChar (CP_ACP, 0, in, -1, out, N);
+}
 
 HKEY hKey = NULL;
 HANDLE out = NULL;
@@ -32,7 +39,7 @@ std::wstring_view args;
 
 bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
-bool PrintValueFromRegistry (const wchar_t * value, const wchar_t * prefix = nullptr);
+bool PrintValueFromRegistry (const char * value, char prefix = 0);
 void PrintUserInformation ();
 void PrintOsArchitecture ();
 
@@ -45,17 +52,17 @@ __declspec (noreturn) void main () {
     InitPrint ();
     InitArguments ();
     RtlGetNtVersionNumbers (&major, &minor, &build);
-    RegOpenKeyEx (HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_QUERY_VALUE, &hKey);
+    RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_QUERY_VALUE, &hKey);
 
     build &= 0x0FFF'FFFF;
     colors = GetConsoleColors ();
-    hKernel32 = GetModuleHandle (L"KERNEL32");
+    hKernel32 = GetModuleHandleA ("KERNEL32");
 
     // winver.com
     // winver.com -a
 
     if (args.empty () || args.contains (L'a')) {
-        Print (L"\r\n");
+        Print ("\r\n");
 
         // Windows 11 Pro Insider Preview
         // Windows 10 Enterprise N 2016 LTSB
@@ -64,29 +71,29 @@ __declspec (noreturn) void main () {
         // Azure Stack HCI
 
         if (major < 10 || !ShowBrandingFromAPI ()) {
-            if (!PrintValueFromRegistry (L"ProductName")) {
+            if (!PrintValueFromRegistry ("ProductName")) {
                 PrintRsrc (1);
             }
         }
 
         // [Version 22H2 Major.Minor.Build.UBR]
 
-        Print (L" [");
+        Print (" [");
         PrintRsrc (2);
         SetTextColor (15);
-        if (PrintValueFromRegistry (L"DisplayVersion") || PrintValueFromRegistry (L"ReleaseId")) {
+        if (PrintValueFromRegistry ("DisplayVersion") || PrintValueFromRegistry ("ReleaseId")) {
             Print (L' ');
         }
         ResetTextColor ();
         ShowVersionNumbers ();
-        PrintValueFromRegistry (L"CSDVersion", L" "); // TODO: prefer GetVersionEx?
+        PrintValueFromRegistry ("CSDVersion", ' '); // TODO: prefer GetVersionEx?
 
 #ifdef _M_ARM64
-        Print (L"] ARM-64\r\n");
+        Print ("] ARM-64\r\n");
 #else
-        Print (L"] ");
+        Print ("] ");
         PrintOsArchitecture ();
-        Print (L"\r\n");
+        Print ("\r\n");
 #endif
     }
 
@@ -95,8 +102,8 @@ __declspec (noreturn) void main () {
 
     if (IsOptionPresent (L'b')) {
         SetTextColor (8);
-        if (PrintValueFromRegistry (L"BuildLabEx") || PrintValueFromRegistry (L"BuildLab")) {
-            Print (L"\r\n");
+        if (PrintValueFromRegistry ("BuildLabEx") || PrintValueFromRegistry ("BuildLab")) {
+            Print ("\r\n");
         }
         ResetTextColor ();
     }
@@ -148,7 +155,7 @@ __declspec (noreturn) void main () {
         PrintNumber (mm, 10, 2);
         Print (L':');
         PrintNumber (ss, 10, 2);
-        Print (L"\r\n");
+        Print ("\r\n");
     }
 
     if (IsOptionPresent (L'c')) {
@@ -174,7 +181,7 @@ __declspec (noreturn) void main () {
 
 bool ShowBrandingFromAPI () {
     bool result = false;
-    if (auto dll = LoadLibrary (L"WINBRAND")) {
+    if (auto dll = LoadLibraryA ("WINBRAND")) {
         LPWSTR (WINAPI * ptrBrandingFormatString) (LPCWSTR) = NULL;
         if (Windows::Symbol (dll, ptrBrandingFormatString, "BrandingFormatString")) {
             if (auto text = ptrBrandingFormatString (L"%WINDOWS_LONG%")) {
@@ -188,8 +195,11 @@ bool ShowBrandingFromAPI () {
     return result;
 }
 
-std::size_t GetRegistryString (const wchar_t * value, wchar_t * buffer, std::size_t length) {
+std::size_t GetRegistryString (const char * avalue, wchar_t * buffer, std::size_t length) {
     if (hKey) {
+        wchar_t value [256];
+        Convert (avalue, value);
+
         DWORD size = length * sizeof (wchar_t);
         DWORD type = 0;
         if (RegQueryValueEx (hKey, value, NULL, &type, (LPBYTE) buffer, &size) == ERROR_SUCCESS) {
@@ -203,8 +213,11 @@ std::size_t GetRegistryString (const wchar_t * value, wchar_t * buffer, std::siz
     return false;
 }
 
-bool PrintValueFromRegistry (const wchar_t * value, const wchar_t * prefix) {
+bool PrintValueFromRegistry (const char * avalue, char prefix) {
     if (hKey) {
+        wchar_t value [256];
+        Convert (avalue, value);
+
         wchar_t text [512];
         DWORD size = sizeof text;
         DWORD type = 0;
@@ -237,8 +250,8 @@ void PrintUserInformation () {
         wchar_t owner [512];
         wchar_t organization [512];
 
-        auto nowner = GetRegistryString (L"RegisteredOwner", owner, 512);
-        auto norganization = GetRegistryString (L"RegisteredOrganization", organization, 512);
+        auto nowner = GetRegistryString ("RegisteredOwner", owner, 512);
+        auto norganization = GetRegistryString ("RegisteredOrganization", organization, 512);
 
         if (nowner + norganization) {
             SetTextColor (11);
@@ -247,12 +260,12 @@ void PrintUserInformation () {
             if (nowner) {
                 PrintRsrc (4);
                 Print (owner, nowner);
-                Print (L"\r\n");
+                Print ("\r\n");
             }
             if (norganization) {
                 PrintRsrc (4);
                 Print (organization, norganization);
-                Print (L"\r\n");
+                Print ("\r\n");
             }
         }
     }
@@ -291,9 +304,9 @@ void ShowVersionNumbers () {
     ResetTextColor ();
     PrintNumber (build);
 
-    if (!PrintValueFromRegistry (L"UBR", L".")) {
+    if (!PrintValueFromRegistry ("UBR", '.')) {
         wchar_t text [128];
-        if (GetRegistryString (L"BuildLabEx", text, 128)) {
+        if (GetRegistryString ("BuildLabEx", text, 128)) {
             if (auto pUBR = std::wcschr (text, L'.')) {
                 if (auto pUBRend = std::wcschr (pUBR + 1, L'.')) {
                     *pUBRend = L'\0';
@@ -301,7 +314,7 @@ void ShowVersionNumbers () {
                 Print (pUBR);
             }
         } else {
-            PrintValueFromRegistry (L"CSDBuildNumber", L".");
+            PrintValueFromRegistry ("CSDBuildNumber", '.');
         }
     }
 }
@@ -318,14 +331,14 @@ void PrintOsArchitecture () {
                 default:
 #ifndef _WIN64                
                 case IMAGE_FILE_MACHINE_I386:
-                    Print (L"32-bit");
+                    Print ("32-bit");
                     break;
 #endif
                 case IMAGE_FILE_MACHINE_AMD64:
-                    Print (L"64-bit");
+                    Print ("64-bit");
                     break;
                 case IMAGE_FILE_MACHINE_ARM64:
-                    Print (L"ARM-64");
+                    Print ("ARM-64");
                     break;
             }
             return;
@@ -333,15 +346,15 @@ void PrintOsArchitecture () {
     }
 
 #ifdef _WIN64
-    Print (L"64-bit");
+    Print ("64-bit");
 #else
     BOOL wow = FALSE;
     if (IsWow64Process ((HANDLE) -1, &wow) && wow) {
-        Print (L"64-bit");
+        Print ("64-bit");
         return;
     }
 
-    Print (L"32-bit");
+    Print ("32-bit");
 #endif
 }
 #endif
@@ -372,6 +385,12 @@ void InitPrint () {
         case FILE_TYPE_PIPE:
             file = true;
     }
+}
+
+void Print (const char * text) {
+    wchar_t buffer [3072];
+    Convert (text, buffer); // TODO: lenghht
+    return Print (buffer);
 }
 
 void Print (const wchar_t * text, std::size_t length) {

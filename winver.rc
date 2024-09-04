@@ -1,0 +1,13 @@
+﻿#include <windows.h>
+ 
+STRINGTABLE
+LANGUAGE LANG_ENGLISH, SUBLANG_DEFAULT
+BEGIN
+    1   "Windows"
+    2   "Version "
+    3   "\r\nLicensed to:\r\n"
+    4   "    "
+    5   "\r\nUptime: "
+    6   "y "
+    7   "d "
+END
