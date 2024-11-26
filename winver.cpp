@@ -185,9 +185,11 @@ bool ShowBrandingFromAPI () {
         LPWSTR (WINAPI * ptrBrandingFormatString) (LPCWSTR) = NULL;
         if (Windows::Symbol (dll, ptrBrandingFormatString, "BrandingFormatString")) {
             if (auto text = ptrBrandingFormatString (L"%WINDOWS_LONG%")) {
-                Print (text);
-                // LocalFree (text);
-                result = true;
+                if (text [0]) {
+                    Print (text);
+                    // LocalFree (text);
+                    result = true;
+                }
             }
         }
         // FreeLibrary (dll);
