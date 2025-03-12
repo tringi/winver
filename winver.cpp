@@ -1,4 +1,6 @@
 #include <Windows.h>
+#include <slpublic.h>
+
 #include <cstddef>
 #include <charconv>
 #include <string_view>
@@ -30,6 +32,7 @@ std::size_t Convert (const char * in, wchar_t (&out) [N]) {
 HKEY hKey = NULL;
 HANDLE out = NULL;
 HMODULE hKernel32 = NULL;
+HMODULE hSLWGA = NULL;
 bool  file = false;
 UCHAR colors = 0;
 DWORD major = 0;
@@ -42,21 +45,38 @@ void ShowVersionNumbers ();
 bool PrintValueFromRegistry (const char * value, char prefix = 0);
 void PrintUserInformation ();
 void PrintOsArchitecture ();
+void PrintLicenseStatus ();
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
-extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NTDLL
+extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NTDLL 5.1
+
+void InitVersionNumbers () {
+    void (WINAPI * ptrRtlGetNtVersionNumbers) (LPDWORD, LPDWORD, LPDWORD) = NULL;
+    if (Windows::Symbol (GetModuleHandleA ("NTDLL"), ptrRtlGetNtVersionNumbers, "RtlGetNtVersionNumbers")) {
+        ptrRtlGetNtVersionNumbers (&major, &minor, &build);
+    } else {
+        OSVERSIONINFO os;
+        os.dwOSVersionInfoSize = sizeof os;
+        if (GetVersionEx (&os)) {
+            major = os.dwMajorVersion;
+            minor = os.dwMinorVersion;
+            build = os.dwBuildNumber;
+        }
+    }
+}
 
 // Entry Point
 
 __declspec (noreturn) void main () {
     InitPrint ();
     InitArguments ();
-    RtlGetNtVersionNumbers (&major, &minor, &build);
+    InitVersionNumbers ();
     RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_QUERY_VALUE, &hKey);
 
     build &= 0x0FFF'FFFF;
     colors = GetConsoleColors ();
     hKernel32 = GetModuleHandleA ("KERNEL32");
+    hSLWGA = LoadLibraryA ("SLWGA");
 
     // winver.com
     // winver.com -a
@@ -113,6 +133,7 @@ __declspec (noreturn) void main () {
 
     if (IsOptionPresent (L'o')) {
         PrintUserInformation ();
+        PrintLicenseStatus ();
     }
 
     // winver.com -u
@@ -295,6 +316,21 @@ void PrintNumber (T number, int base, int digits) {
     }
 }
 
+UINT GetFileBuildNumber (const char * filename) {
+    auto cb = GetFileVersionInfoSizeA (filename, NULL);
+    if (auto data = LocalAlloc (LMEM_FIXED, cb)) {
+        if (GetFileVersionInfoA (filename, 0, cb, data)) {
+
+            VS_FIXEDFILEINFO * info = NULL;
+            UINT infolen = sizeof info;
+            if (VerQueryValueA (data, "\\", (LPVOID *) &info, &infolen)) {
+                return LOWORD (info->dwProductVersionLS);
+            }
+        }
+    }
+    return 0;
+}
+
 void ShowVersionNumbers () {
     if (major == 10 && minor == 0) {
         SetTextColor (8);
@@ -316,7 +352,20 @@ void ShowVersionNumbers () {
                 Print (pUBR);
             }
         } else {
-            PrintValueFromRegistry ("CSDBuildNumber", '.');
+            if (!PrintValueFromRegistry ("CSDBuildNumber", '.')) {
+
+                auto ubrKernel = GetFileBuildNumber ("NTOSKRNL.EXE");
+                auto ubrUser = GetFileBuildNumber ("NTDLL");
+                
+                if (ubrKernel || ubrUser) {
+                    Print (L'.');
+                    if (ubrKernel > ubrUser) {
+                        PrintNumber (ubrKernel);
+                    } else {
+                        PrintNumber (ubrUser);
+                    }
+                }
+            }
         }
     }
 }
@@ -351,15 +400,22 @@ void PrintOsArchitecture () {
     Print ("64-bit");
 #else
     BOOL wow = FALSE;
-    if (IsWow64Process ((HANDLE) -1, &wow) && wow) {
-        Print ("64-bit");
-        return;
+    BOOL (WINAPI * ptrIsWow64Process) (HANDLE, BOOL *) = NULL;
+    if (Windows::Symbol (hKernel32, ptrIsWow64Process, "IsWow64Process")) {
+        if (ptrIsWow64Process ((HANDLE) -1, &wow) && wow) {
+            Print ("64-bit");
+            return;
+        }
     }
 
     Print ("32-bit");
 #endif
 }
 #endif
+
+void PrintLicenseStatus () {
+
+}
 
 void InitPrint () {
 
