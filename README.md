@@ -34,6 +34,7 @@ by version 0.2 (see below what's new in latest version)
     Windows 7 Enterprise [Version 6.1.7601.24546 Service Pack 1]
     Windows Vista (TM) Ultimate [Version 6.0.6002 Service Pack 2]
     Microsoft Windows XP [Version 5.1.2600 Service Pack 3]
+    Microsoft Windows 2000 [Version 5.0.2195.6717 Service Pack 4] 32-bit
     Windows Server 2022 Datacenter Evaluation [Version 21H2 10.0.20348.2159]
     Windows Server 2012 R2 Standard [Version 6.3.9600.21620]
     Windows Server (R) 2008 Datacenter without Hyper-V [Version 6.0.6003.20706 Service Pack 2]
@@ -53,6 +54,11 @@ Command-line parameters added to display additional information:
 * `-b` displays full build string, e.g.: `14393.6611.amd64fre.rs1_release.231218-1733`
 * `-o` displays *Licensed to User/Organization* information, just like winver.exe
 * `-u` displays uptime, e.g.: `Uptime: 1y 123d 23:01:59`
+
+## What's new in 0.4
+
+* 32-bit build now supports Windows 2000, including UBR number
+* UBR number is now also properly displayed on XP
 
 ## Notes
 
