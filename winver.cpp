@@ -158,7 +158,8 @@ __declspec (noreturn) void main () {
 
     // winver.com -l
     //  - Expires 23.12.2025 12:34
-    //  - 
+    //  - License: Activated
+    //  - Remaining reasm count: 1001
 
     if (IsOptionPresent (L'l')) {
         PrintExpiration ();
@@ -183,7 +184,6 @@ __declspec (noreturn) void main () {
     }
 
     // TODO: hypervisor info?
-    // TODO: licensing and expiration status
     // TODO: ?? memory size and OS bitness (3GT)
     // TODO: ?? processors and levels, architectures, SSE,AVX,etc...
     // TODO: ?? supported architectures?
