@@ -15,6 +15,7 @@ BEGIN
     10  "Total grace days: "
     11  "Remaining grace time: "
     12  "Remaining rearm count: "
+    13  "\r\nSupported architectures: "
 
     0x10 "Genuine"
     0x11 "Unlicensed"

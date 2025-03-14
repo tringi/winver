@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <charconv>
 #include <string_view>
+#include <span>
 
 #include "lib/Windows_Symbol.hpp"
 
@@ -36,6 +37,7 @@ HANDLE out = NULL;
 HMODULE hKernel32 = NULL;
 bool  file = false;
 UCHAR colors = 0;
+USHORT native = 0;
 DWORD major = 0;
 DWORD minor = 0;
 DWORD build = 0;
@@ -45,6 +47,7 @@ bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
 bool PrintValueFromRegistry (const char * value, char prefix = 0);
 void PrintUserInformation ();
+void PrintSupportedArchitectures ();
 void PrintOsArchitecture ();
 void PrintLicenseStatus ();
 void PrintExpiration ();
@@ -117,6 +120,7 @@ __declspec (noreturn) void main () {
 
 #ifdef _M_ARM64
         Print ("] ARM-64\r\n");
+        native = IMAGE_FILE_MACHINE_ARM64;
 #else
         Print ("] ");
         PrintOsArchitecture ();
@@ -173,6 +177,13 @@ __declspec (noreturn) void main () {
         PrintUserInformation ();
     }
 
+    // winver.com -i
+    //  - Architectures supported: AArch64, AArch32, x86-64, x86-32
+
+    if (IsOptionPresent (L'i')) {
+        PrintSupportedArchitectures ();
+    }
+
     if (IsOptionPresent (L'c')) {
         // CPUID, arch, SSE,AVX,etc...
     }
@@ -186,7 +197,6 @@ __declspec (noreturn) void main () {
     // TODO: hypervisor info?
     // TODO: ?? memory size and OS bitness (3GT)
     // TODO: ?? processors and levels, architectures, SSE,AVX,etc...
-    // TODO: ?? supported architectures?
     // TODO: ?? disk size and free space
 
     ExitProcess (0);
@@ -368,8 +378,6 @@ void PrintOsArchitecture () {
     BOOL (WINAPI * ptrIsWow64Process2) (HANDLE, USHORT *, USHORT *) = NULL;
     if (Windows::Symbol (hKernel32, ptrIsWow64Process2, "IsWow64Process2")) {
         USHORT process = 0;
-        USHORT native = 0;
-
         if (ptrIsWow64Process2 ((HANDLE) -1, &process, &native)) {
             switch (native) {
                 default:
@@ -391,20 +399,164 @@ void PrintOsArchitecture () {
 
 #ifdef _WIN64
     Print ("64-bit");
+    native = IMAGE_FILE_MACHINE_AMD64;
 #else
     BOOL wow = FALSE;
     BOOL (WINAPI * ptrIsWow64Process) (HANDLE, BOOL *) = NULL;
     if (Windows::Symbol (hKernel32, ptrIsWow64Process, "IsWow64Process")) {
         if (ptrIsWow64Process ((HANDLE) -1, &wow) && wow) {
             Print ("64-bit");
+            native = IMAGE_FILE_MACHINE_AMD64;
             return;
         }
     }
 
     Print ("32-bit");
+    native = IMAGE_FILE_MACHINE_I386;
 #endif
 }
 #endif
+
+void PrintSupportedArchitectures () {
+    typedef enum _SYSTEM_INFORMATION_CLASS {
+        SystemSupportedProcessorArchitectures = 181,
+        SystemSupportedProcessorArchitectures2 = 230, // Not 14393, yes 22543
+    } SYSTEM_INFORMATION_CLASS;
+
+    NTSTATUS (NTAPI * ptrNtQuerySystemInformationEx) (_In_ SYSTEM_INFORMATION_CLASS,
+                                                      _In_reads_bytes_ (InputBufferLength) PVOID, _In_ ULONG InputBufferLength,
+                                                      _Out_writes_bytes_opt_ (SystemInformationLength) PVOID, _In_ ULONG SystemInformationLength,
+                                                      _Out_opt_ PULONG) = NULL;
+    if (Windows::Symbol (GetModuleHandleA ("NTDLL"), ptrNtQuerySystemInformationEx, "NtQuerySystemInformationEx")) {
+        
+        typedef struct _SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION {
+            DWORD Machine : 16;
+            DWORD KernelMode : 1;
+            DWORD UserMode : 1;
+            DWORD Native : 1;
+            DWORD Process : 1;
+            DWORD WoW64Container : 1;
+            DWORD ReservedZero0 : 11;
+        } SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION;
+
+        HANDLE process = (HANDLE) -1;
+        SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION machines [24] = {};
+
+        bool first = true;
+        bool oldAPI = false;
+
+        ULONG result = 0;
+        if (ptrNtQuerySystemInformationEx (SystemSupportedProcessorArchitectures2, &process, sizeof (process), machines, sizeof (machines), &result) != ERROR_SUCCESS) {
+            if (ptrNtQuerySystemInformationEx (SystemSupportedProcessorArchitectures, &process, sizeof (process), machines, sizeof (machines), &result) == ERROR_SUCCESS) {
+                oldAPI = true;
+            } else {
+                result = 0;
+            }
+        }
+
+        if (result) {
+            const auto n = result / sizeof (SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION);
+
+            // std::sort (&machines [0], &machines [n],
+                       //[] (auto & a, auto & b) { return a.Machine > b.Machine; });
+            std::qsort (machines, n, 4,
+                        [] (const void * a, const void * b) -> int {
+                            return ((const SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION *) a)->Machine
+                                 < ((const SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION *) b)->Machine;
+                        });
+
+            for (auto machine : std::span <SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION> (machines, n)) {
+                if (machine.Machine) {
+
+                    if (first) {
+                        PrintRsrc (13);
+                    } else {
+                        Print (", ");
+                    }
+                    first = false;
+
+                    switch (machine.Machine) {
+                        case IMAGE_FILE_MACHINE_I386: Print ("x86-32"); break;
+                        case IMAGE_FILE_MACHINE_ARMNT: Print ("AArch32"); break;
+                        case IMAGE_FILE_MACHINE_AMD64: Print ("x86-64"); break;
+                        case IMAGE_FILE_MACHINE_ARM64: Print ("AArch64"); break;
+                    }
+
+                    bool wow64 = !!machine.WoW64Container;
+                    bool emulated = !machine.Native;
+
+                    if (oldAPI) {
+                        wow64 = emulated;
+                        emulated = false;
+                    } else {
+                        // do not consider 32b on 64b of the same architecture emulated
+                        switch (machine.Machine) {
+                            case IMAGE_FILE_MACHINE_I386:
+                                if (native == IMAGE_FILE_MACHINE_AMD64) {
+                                    emulated = false;
+                                }
+                                break;
+                            case IMAGE_FILE_MACHINE_ARMNT:
+                                if (native == IMAGE_FILE_MACHINE_ARM64) {
+                                    emulated = false;
+                                }
+                                break;
+                        }
+                    }
+
+                    if (wow64 || emulated) {
+                        Print (" (");
+                        if (wow64 && emulated) {
+                            Print ("WoW64");
+                            Print (", ");
+                            Print ("emulated");
+                        } else {
+                            if (wow64) {
+                                Print ("WoW64");
+                            }
+                            if (emulated) {
+                                Print ("emulated");
+                            }
+                        }
+                        Print (')');
+                    }
+                }
+            }
+
+            Print ("\r\n");
+            return;
+        }
+    }
+
+#ifndef _M_ARM64
+    BOOL wow = FALSE;
+    BOOL (WINAPI * ptrIsWow64Process) (HANDLE, BOOL *) = NULL;
+    if (Windows::Symbol (hKernel32, ptrIsWow64Process, "IsWow64Process")) {
+        PrintRsrc (13);
+
+#ifdef _WIN64
+        Print ("x86-64");
+        Print (", ");
+        Print ("x86-32");
+        Print (" (");
+        Print ("WoW64");
+        Print (')');
+#else
+        if (ptrIsWow64Process ((HANDLE) -1, &wow) && wow) {
+            Print ("x86-64");
+            Print (", ");
+            Print ("x86-32");
+            Print (" (");
+            Print ("WoW64");
+            Print (')');
+        } else {
+            Print ("x86-32");
+        }
+#endif
+        Print ("\r\n");
+    }
+#endif
+}
 
 void PrintExpiration () {
     SYSTEMTIME st;
@@ -421,7 +573,7 @@ void PrintExpiration () {
                         Print (L' ');
                         Print (buffer, length);
                     }
-                    Print (L"\r\n");
+                    Print ("\r\n");
                 }
             }
         }
@@ -432,11 +584,15 @@ void PrintLicenseStatus () {
     static const GUID WindowsGUID = { 0x55c92734, 0xd682, 0x4d71, 0x98, 0x3e, 0xd6, 0xec, 0x3f, 0x16, 0x05, 0x9f };
 
     HRESULT (WINAPI * ptrSLOpen) (_Out_ HSLC *) = NULL;
-    HRESULT (WINAPI * ptrSLGetSLIDList) (_In_ HSLC, _In_ SLIDTYPE, _In_opt_ CONST SLID *, _In_ SLIDTYPE, _Out_ UINT * pnReturnIds, _Outptr_result_buffer_ (*pnReturnIds) SLID **) = NULL;
+    HRESULT (WINAPI * ptrSLGetSLIDList) (_In_ HSLC, _In_ SLIDTYPE, _In_opt_ CONST SLID *, _In_ SLIDTYPE,
+                                         _Out_ UINT * pnReturnIds, _Outptr_result_buffer_ (*pnReturnIds) SLID **) = NULL;
     HRESULT (WINAPI * ptrSLGenerateOfflineInstallationId) (_In_ HSLC, _In_ CONST SLID *, _Outptr_ PWSTR *) = NULL;
-    HRESULT (WINAPI * ptrSLGetProductSkuInformation) (_In_ HSLC, _In_ CONST SLID *, _In_ PCWSTR, _Out_opt_ SLDATATYPE *, _Out_ UINT * pcbValue, _Outptr_result_bytebuffer_ (*pcbValue) PBYTE *) = NULL;
-    HRESULT (WINAPI * ptrSLGetApplicationInformation) (_In_ HSLC, _In_ const SLID *, _In_ PCWSTR, _Out_opt_ SLDATATYPE *, _Out_ UINT * pcbValue, _Outptr_result_bytebuffer_ (*pcbValue) PBYTE *) = NULL;
-    HRESULT (WINAPI * ptrSLGetLicensingStatusInformation) (_In_ HSLC, _In_opt_ CONST SLID *, _In_opt_ CONST SLID *, _In_opt_ PCWSTR, _Out_ UINT * pnStatusCount, _Outptr_result_buffer_ (*pnStatusCount) SL_LICENSING_STATUS **) = NULL;
+    HRESULT (WINAPI * ptrSLGetProductSkuInformation) (_In_ HSLC, _In_ CONST SLID *, _In_ PCWSTR, _Out_opt_ SLDATATYPE *,
+                                                      _Out_ UINT * pcbValue, _Outptr_result_bytebuffer_ (*pcbValue) PBYTE *) = NULL;
+    HRESULT (WINAPI * ptrSLGetApplicationInformation) (_In_ HSLC, _In_ const SLID *, _In_ PCWSTR, _Out_opt_ SLDATATYPE *,
+                                                       _Out_ UINT * pcbValue, _Outptr_result_bytebuffer_ (*pcbValue) PBYTE *) = NULL;
+    HRESULT (WINAPI * ptrSLGetLicensingStatusInformation) (_In_ HSLC, _In_opt_ CONST SLID *, _In_opt_ CONST SLID *, _In_opt_ PCWSTR,
+                                                           _Out_ UINT * pnStatusCount, _Outptr_result_buffer_ (*pnStatusCount) SL_LICENSING_STATUS **) = NULL;
 
     // Win8+
 
@@ -501,12 +657,12 @@ void PrintLicenseStatus () {
                                                                     PrintNumber ((UINT) thisLicensingStatus->eStatus);
                                                             }
                                                             ResetTextColor ();
-                                                            Print (L"\r\n");
+                                                            Print ("\r\n");
 
                                                             if (thisLicensingStatus->dwTotalGraceDays) {
                                                                 PrintRsrc (10);
                                                                 PrintNumber (thisLicensingStatus->dwTotalGraceDays);
-                                                                Print (L"\r\n");
+                                                                Print ("\r\n");
                                                             }
                                                             if (thisLicensingStatus->dwGraceTime) {
                                                                 PrintRsrc (11);
@@ -521,7 +677,7 @@ void PrintLicenseStatus () {
                                                         if (type == SL_DATA_DWORD) {
                                                             PrintRsrc (12);
                                                             PrintNumber (*(DWORD *) data);
-                                                            Print (L"\r\n");
+                                                            Print ("\r\n");
                                                         }
                                                     }
                                                 }
@@ -567,7 +723,7 @@ void PrintLicenseStatus () {
                         PrintNumber ((UINT) state);
                 }
                 ResetTextColor ();
-                Print (L"\r\n");
+                Print ("\r\n");
             }
         }
     }

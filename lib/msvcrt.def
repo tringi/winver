@@ -10,3 +10,4 @@ EXPORTS
 	memset
 	memcpy
 	memmove
+	qsort
