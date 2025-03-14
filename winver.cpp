@@ -53,7 +53,7 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NTDLL 5.1
 
 void InitVersionNumbers () {
-#ifndef _WIN64
+#ifdef _WIN64
     RtlGetNtVersionNumbers (&major, &minor, &build);
 #else
     void (WINAPI * ptrRtlGetNtVersionNumbers) (LPDWORD, LPDWORD, LPDWORD) = NULL;
