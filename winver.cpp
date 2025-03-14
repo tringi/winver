@@ -485,6 +485,11 @@ void PrintLicenseStatus () {
 
                                                             PrintRsrc (9);
                                                             switch (thisLicensingStatus->eStatus) {
+                                                                case SL_LICENSING_STATUS_UNLICENSED: SetTextColor (12); break;
+                                                                case SL_LICENSING_STATUS_LICENSED: SetTextColor (10); break;
+                                                                case SL_LICENSING_STATUS_NOTIFICATION: SetTextColor (14); break;
+                                                            }
+                                                            switch (thisLicensingStatus->eStatus) {
                                                                 case SL_LICENSING_STATUS_UNLICENSED:
                                                                 case SL_LICENSING_STATUS_LICENSED:
                                                                 case SL_LICENSING_STATUS_IN_GRACE_PERIOD:
@@ -495,6 +500,7 @@ void PrintLicenseStatus () {
                                                                 default:
                                                                     PrintNumber ((UINT) thisLicensingStatus->eStatus);
                                                             }
+                                                            ResetTextColor ();
                                                             Print (L"\r\n");
 
                                                             if (thisLicensingStatus->dwTotalGraceDays) {
@@ -547,6 +553,10 @@ void PrintLicenseStatus () {
 
                 PrintRsrc (9);
                 switch (state) {
+                    case SL_GEN_STATE_INVALID_LICENSE: SetTextColor (12); break;
+                    case SL_GEN_STATE_IS_GENUINE: SetTextColor (10); break;
+                }
+                switch (state) {
                     case SL_GEN_STATE_IS_GENUINE:
                     case SL_GEN_STATE_INVALID_LICENSE:
                     case SL_GEN_STATE_TAMPERED:
@@ -556,6 +566,7 @@ void PrintLicenseStatus () {
                     default:
                         PrintNumber ((UINT) state);
                 }
+                ResetTextColor ();
                 Print (L"\r\n");
             }
         }
