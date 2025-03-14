@@ -7,16 +7,18 @@
 
 #include "lib/Windows_Symbol.hpp"
 
+#pragma warning(disable: 28159)
+
 void Print (wchar_t c);
 void Print (const wchar_t * text);
 void Print (const wchar_t * text, std::size_t length);
 void Print (const char * text);
-void Print (const char * text, std::size_t length);
 void PrintRsrc (unsigned int);
 template <typename T>
 void PrintNumber (T number, int base, int digits);
 template <typename T>
 void PrintNumber (T number) { PrintNumber (number, 10, 0); };
+void PrintElapse (std::uint64_t value, bool seconds);
 void InitPrint ();
 void InitArguments ();
 UCHAR GetConsoleColors ();
@@ -25,14 +27,13 @@ void ResetTextColor ();
 bool IsOptionPresent (wchar_t c);
 
 template <std::size_t N>
-std::size_t Convert (const char * in, wchar_t (&out) [N]) {
+std::size_t Convert (const char * in, _Out_writes_z_ (N) wchar_t (&out) [N]) {
     return MultiByteToWideChar (CP_ACP, 0, in, -1, out, N);
 }
 
 HKEY hKey = NULL;
 HANDLE out = NULL;
 HMODULE hKernel32 = NULL;
-HMODULE hSLWGA = NULL;
 bool  file = false;
 UCHAR colors = 0;
 DWORD major = 0;
@@ -46,11 +47,15 @@ bool PrintValueFromRegistry (const char * value, char prefix = 0);
 void PrintUserInformation ();
 void PrintOsArchitecture ();
 void PrintLicenseStatus ();
+void PrintExpiration ();
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NTDLL 5.1
 
 void InitVersionNumbers () {
+#ifndef _WIN64
+    RtlGetNtVersionNumbers (&major, &minor, &build);
+#else
     void (WINAPI * ptrRtlGetNtVersionNumbers) (LPDWORD, LPDWORD, LPDWORD) = NULL;
     if (Windows::Symbol (GetModuleHandleA ("NTDLL"), ptrRtlGetNtVersionNumbers, "RtlGetNtVersionNumbers")) {
         ptrRtlGetNtVersionNumbers (&major, &minor, &build);
@@ -63,6 +68,9 @@ void InitVersionNumbers () {
             build = os.dwBuildNumber;
         }
     }
+#endif
+    // NT 10+
+    // auto NtBuildNumber = *(const ULONG *) 0x7ffe0260;
 }
 
 // Entry Point
@@ -76,7 +84,6 @@ __declspec (noreturn) void main () {
     build &= 0x0FFF'FFFF;
     colors = GetConsoleColors ();
     hKernel32 = GetModuleHandleA ("KERNEL32");
-    hSLWGA = LoadLibraryA ("SLWGA");
 
     // winver.com
     // winver.com -a
@@ -106,7 +113,7 @@ __declspec (noreturn) void main () {
         }
         ResetTextColor ();
         ShowVersionNumbers ();
-        PrintValueFromRegistry ("CSDVersion", ' '); // TODO: prefer GetVersionEx?
+        PrintValueFromRegistry ("CSDVersion", ' ');
 
 #ifdef _M_ARM64
         Print ("] ARM-64\r\n");
@@ -128,14 +135,6 @@ __declspec (noreturn) void main () {
         ResetTextColor ();
     }
 
-    // winver.com -o
-    //  - Licensed to: \n User name \n Company name
-
-    if (IsOptionPresent (L'o')) {
-        PrintUserInformation ();
-        PrintLicenseStatus ();
-    }
-
     // winver.com -u
     //  - Uptime: 1y 123d 23:02:59
 
@@ -153,30 +152,24 @@ __declspec (noreturn) void main () {
 
 #endif
         t /= 1000u;
-        DWORD ss = t % 60u;
-        t /= 60u;
-        DWORD mm = t % 60u;
-        t /= 60u;
-        DWORD hh = t % 24u;
-        t /= 24u;
-        DWORD dd = t % 365u;
-        t /= 365u;
-
         PrintRsrc (5);
-        if (t) {
-            PrintNumber ((DWORD) t);
-            PrintRsrc (6); // y
-        }
-        if (dd) {
-            PrintNumber (dd);
-            PrintRsrc (7); // d
-        }
-        PrintNumber (hh, 10, 2);
-        Print (L':');
-        PrintNumber (mm, 10, 2);
-        Print (L':');
-        PrintNumber (ss, 10, 2);
-        Print ("\r\n");
+        PrintElapse (t, true);
+    }
+
+    // winver.com -l
+    //  - Expires 23.12.2025 12:34
+    //  - 
+
+    if (IsOptionPresent (L'l')) {
+        PrintExpiration ();
+        PrintLicenseStatus ();
+    }
+
+    // winver.com -o
+    //  - Licensed to: \n User name \n Company name
+
+    if (IsOptionPresent (L'o')) {
+        PrintUserInformation ();
     }
 
     if (IsOptionPresent (L'c')) {
@@ -196,7 +189,6 @@ __declspec (noreturn) void main () {
     // TODO: ?? supported architectures?
     // TODO: ?? disk size and free space
 
-    // RegCloseKey (hKey);
     ExitProcess (0);
 }
 
@@ -208,12 +200,10 @@ bool ShowBrandingFromAPI () {
             if (auto text = ptrBrandingFormatString (L"%WINDOWS_LONG%")) {
                 if (text [0]) {
                     Print (text);
-                    // LocalFree (text);
                     result = true;
                 }
             }
         }
-        // FreeLibrary (dll);
     }
     return result;
 }
@@ -296,7 +286,7 @@ void PrintUserInformation () {
 
 template <typename T>
 void PrintNumber (T number, int base, int digits) {
-    char a [64u];
+    char a [28u];
 
     if (auto [end, error] = std::to_chars (&a [0], &a [sizeof a], number, base); error == std::errc ()) {
         auto n = end - a;
@@ -343,6 +333,7 @@ void ShowVersionNumbers () {
     PrintNumber (build);
 
     if (!PrintValueFromRegistry ("UBR", '.')) {
+#ifndef _M_ARM64
         wchar_t text [128];
         if (GetRegistryString ("BuildLabEx", text, 128)) {
             if (auto pUBR = std::wcschr (text, L'.')) {
@@ -353,7 +344,7 @@ void ShowVersionNumbers () {
             }
         } else {
             if (!PrintValueFromRegistry ("CSDBuildNumber", '.')) {
-
+#ifndef _WIN64
                 auto ubrKernel = GetFileBuildNumber ("NTOSKRNL.EXE");
                 auto ubrUser = GetFileBuildNumber ("NTDLL");
                 
@@ -365,8 +356,10 @@ void ShowVersionNumbers () {
                         PrintNumber (ubrUser);
                     }
                 }
+#endif
             }
         }
+#endif
     }
 }
 
@@ -413,8 +406,161 @@ void PrintOsArchitecture () {
 }
 #endif
 
-void PrintLicenseStatus () {
+void PrintExpiration () {
+    SYSTEMTIME st;
+    FILETIME ft;
+    if (*(const std::uint64_t *) 0x7ffe02c8) {
+        if (FileTimeToLocalFileTime ((const FILETIME *) 0x7ffe02c8, &ft)) {
+            if (FileTimeToSystemTime (&ft, &st)) {
 
+                wchar_t buffer [48];
+                if (auto length = GetDateFormatW (LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buffer, sizeof buffer / sizeof buffer [0])) {
+                    PrintRsrc (8);
+                    Print (buffer, length);
+                    if (length = GetTimeFormatW (LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buffer, sizeof buffer / sizeof buffer [0])) {
+                        Print (L' ');
+                        Print (buffer, length);
+                    }
+                    Print (L"\r\n");
+                }
+            }
+        }
+    }
+}
+
+void PrintLicenseStatus () {
+    static const GUID WindowsGUID = { 0x55c92734, 0xd682, 0x4d71, 0x98, 0x3e, 0xd6, 0xec, 0x3f, 0x16, 0x05, 0x9f };
+
+    HRESULT (WINAPI * ptrSLOpen) (_Out_ HSLC *) = NULL;
+    HRESULT (WINAPI * ptrSLGetSLIDList) (_In_ HSLC, _In_ SLIDTYPE, _In_opt_ CONST SLID *, _In_ SLIDTYPE, _Out_ UINT * pnReturnIds, _Outptr_result_buffer_ (*pnReturnIds) SLID **) = NULL;
+    HRESULT (WINAPI * ptrSLGenerateOfflineInstallationId) (_In_ HSLC, _In_ CONST SLID *, _Outptr_ PWSTR *) = NULL;
+    HRESULT (WINAPI * ptrSLGetProductSkuInformation) (_In_ HSLC, _In_ CONST SLID *, _In_ PCWSTR, _Out_opt_ SLDATATYPE *, _Out_ UINT * pcbValue, _Outptr_result_bytebuffer_ (*pcbValue) PBYTE *) = NULL;
+    HRESULT (WINAPI * ptrSLGetApplicationInformation) (_In_ HSLC, _In_ const SLID *, _In_ PCWSTR, _Out_opt_ SLDATATYPE *, _Out_ UINT * pcbValue, _Outptr_result_bytebuffer_ (*pcbValue) PBYTE *) = NULL;
+    HRESULT (WINAPI * ptrSLGetLicensingStatusInformation) (_In_ HSLC, _In_opt_ CONST SLID *, _In_opt_ CONST SLID *, _In_opt_ PCWSTR, _Out_ UINT * pnStatusCount, _Outptr_result_buffer_ (*pnStatusCount) SL_LICENSING_STATUS **) = NULL;
+
+    // Win8+
+
+    if (auto hSlcDLL = LoadLibraryA ("SLC")) {
+        if (Windows::Symbol (hSlcDLL, ptrSLOpen, "SLOpen")) {
+
+            HSLC hSlc;
+            if (SUCCEEDED (ptrSLOpen (&hSlc))) {
+
+                if (Windows::Symbol (hSlcDLL, ptrSLGetSLIDList, "SLGetSLIDList")) {
+
+                    UINT nProductSKUs = 0;
+                    SLID * pProductSKUs = NULL;
+
+                    if (SUCCEEDED (ptrSLGetSLIDList (hSlc, SL_ID_PRODUCT_SKU, NULL, SL_ID_PRODUCT_SKU, &nProductSKUs, &pProductSKUs))) {
+
+                        for (UINT iProductSKUs = 0; iProductSKUs != nProductSKUs; ++iProductSKUs) {
+                            const auto pSkuId = &pProductSKUs [iProductSKUs];
+
+                            if (Windows::Symbol (hSlcDLL, ptrSLGenerateOfflineInstallationId, "SLGenerateOfflineInstallationId")) {
+                                PWSTR pIID = NULL;
+                                if (SUCCEEDED (ptrSLGenerateOfflineInstallationId (hSlc, pSkuId, &pIID))) {
+
+                                    UINT nAppIds = 0;
+                                    SLID * pAppIds;
+                                    if (SUCCEEDED (ptrSLGetSLIDList (hSlc, SL_ID_PRODUCT_SKU, pSkuId, SL_ID_APPLICATION, &nAppIds, &pAppIds))) {
+
+                                        for (UINT iAppIds = 0; iAppIds != nAppIds; ++iAppIds) {
+                                            SLID * pAppId = &pAppIds [iAppIds];
+
+                                            if (IsEqualGUID (*pAppId, WindowsGUID)) {
+                                                
+                                                UINT size;
+                                                BYTE * data;
+                                                SLDATATYPE type;
+
+                                                if (Windows::Symbol (hSlcDLL, ptrSLGetLicensingStatusInformation, "SLGetLicensingStatusInformation")) {
+
+                                                    UINT nLicensingStatus;
+                                                    SL_LICENSING_STATUS * pLicensingStatus;
+
+                                                    if (SUCCEEDED (ptrSLGetLicensingStatusInformation (hSlc, pAppId, pSkuId, NULL, &nLicensingStatus, &pLicensingStatus))) {
+
+                                                        for (UINT iLicensingStatus = 0; iLicensingStatus != nLicensingStatus; ++iLicensingStatus) {
+                                                            SL_LICENSING_STATUS * thisLicensingStatus = &pLicensingStatus [iLicensingStatus];
+
+                                                            PrintRsrc (9);
+                                                            switch (thisLicensingStatus->eStatus) {
+                                                                case SL_LICENSING_STATUS_UNLICENSED:
+                                                                case SL_LICENSING_STATUS_LICENSED:
+                                                                case SL_LICENSING_STATUS_IN_GRACE_PERIOD:
+                                                                case SL_LICENSING_STATUS_NOTIFICATION:
+                                                                case SL_LICENSING_STATUS_LAST:
+                                                                    PrintRsrc (0x20 + (UINT) thisLicensingStatus->eStatus);
+                                                                    break;
+                                                                default:
+                                                                    PrintNumber ((UINT) thisLicensingStatus->eStatus);
+                                                            }
+                                                            Print (L"\r\n");
+
+                                                            if (thisLicensingStatus->dwTotalGraceDays) {
+                                                                PrintRsrc (10);
+                                                                PrintNumber (thisLicensingStatus->dwTotalGraceDays);
+                                                                Print (L"\r\n");
+                                                            }
+                                                            if (thisLicensingStatus->dwGraceTime) {
+                                                                PrintRsrc (11);
+                                                                PrintElapse (thisLicensingStatus->dwGraceTime, false);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                if (Windows::Symbol (hSlcDLL, ptrSLGetApplicationInformation, "SLGetApplicationInformation")) {
+                                                    if (SUCCEEDED (ptrSLGetApplicationInformation (hSlc, pAppId, L"RemainingRearmCount", &type, &size, &data))) {
+                                                        if (type == SL_DATA_DWORD) {
+                                                            PrintRsrc (12);
+                                                            PrintNumber (*(DWORD *) data);
+                                                            Print (L"\r\n");
+                                                        }
+                                                    }
+                                                }
+
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Vista/7
+
+#ifndef _M_ARM64
+    if (auto hSlwgaDLL = LoadLibraryA ("SLWGA")) {
+        HRESULT (WINAPI * ptrSLIsGenuineLocal) (_In_ CONST SLID *, _Out_ SL_GENUINE_STATE *, _Inout_opt_ SL_NONGENUINE_UI_OPTIONS *) = NULL;
+
+        SL_LICENSING_STATUS status {};
+        if (Windows::Symbol (hSlwgaDLL, ptrSLIsGenuineLocal, "SLIsGenuineLocal")) {
+
+            SL_GENUINE_STATE state {};
+            if (SUCCEEDED (ptrSLIsGenuineLocal (&WindowsGUID, &state, NULL))) {
+
+                PrintRsrc (9);
+                switch (state) {
+                    case SL_GEN_STATE_IS_GENUINE:
+                    case SL_GEN_STATE_INVALID_LICENSE:
+                    case SL_GEN_STATE_TAMPERED:
+                    case SL_GEN_STATE_OFFLINE:
+                        PrintRsrc (0x10 + (UINT) state);
+                        break;
+                    default:
+                        PrintNumber ((UINT) state);
+                }
+                Print (L"\r\n");
+            }
+        }
+    }
+#endif
 }
 
 void InitPrint () {
@@ -486,6 +632,37 @@ void PrintRsrc (unsigned int id) {
     if (auto length = LoadString (reinterpret_cast <HINSTANCE> (&__ImageBase), id, (LPWSTR) &string, 0)) {
         Print (string, length);
     }
+}
+
+void PrintElapse (std::uint64_t t, bool seconds) {
+    DWORD ss = 0;
+    if (seconds) {
+        ss = t % 60u;
+        t /= 60u;
+    }
+    DWORD mm = t % 60u;
+    t /= 60u;
+    DWORD hh = t % 24u;
+    t /= 24u;
+    DWORD dd = t % 365u;
+    t /= 365u;
+
+    if (t) {
+        PrintNumber ((DWORD) t);
+        PrintRsrc (6); // y
+    }
+    if (dd) {
+        PrintNumber (dd);
+        PrintRsrc (7); // d
+    }
+    PrintNumber (hh, 10, 2);
+    Print (L':');
+    PrintNumber (mm, 10, 2);
+    if (seconds) {
+        Print (L':');
+        PrintNumber (ss, 10, 2);
+    }
+    Print ("\r\n");
 }
 
 UCHAR GetConsoleColors () {

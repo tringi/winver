@@ -6,6 +6,7 @@ EXPORTS
 	wcscpy
 	wcschr
 	wcsncpy
+	memcmp
 	memset
 	memcpy
 	memmove
