@@ -1,4 +1,5 @@
-EXPORTS 
+EXPORTS
+	__wgetmainargs
 	_snwprintf
 	_snprintf
 	wcslen

@@ -1,9 +1,8 @@
 #include <Windows.h>
 #include <slpublic.h>
 
-#include <cstddef>
 #include <charconv>
-#include <string_view>
+#include <cstddef>
 #include <span>
 
 #include "lib/Windows_Symbol.hpp"
@@ -41,7 +40,9 @@ USHORT native = 0;
 DWORD major = 0;
 DWORD minor = 0;
 DWORD build = 0;
-std::wstring_view args;
+
+int argc;
+wchar_t ** argv;
 
 bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
@@ -54,6 +55,7 @@ void PrintExpiration ();
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NTDLL 5.1
+extern "C" void __wgetmainargs (int *, wchar_t ***, wchar_t ***, int, int *);
 
 void InitVersionNumbers () {
 #ifdef _WIN64
@@ -91,7 +93,7 @@ __declspec (noreturn) void main () {
     // winver.com
     // winver.com -a
 
-    if (args.empty () || args.contains (L'a')) {
+    if (argc <= 1 || IsOptionPresent ('a')) {
         Print ("\r\n");
 
         // Windows 11 Pro Insider Preview
@@ -223,7 +225,7 @@ std::size_t GetRegistryString (const char * avalue, wchar_t * buffer, std::size_
         wchar_t value [256];
         Convert (avalue, value);
 
-        DWORD size = length * sizeof (wchar_t);
+        DWORD size = (DWORD) length * sizeof (wchar_t);
         DWORD type = 0;
         if (RegQueryValueEx (hKey, value, NULL, &type, (LPBYTE) buffer, &size) == ERROR_SUCCESS) {
             switch (type) {
@@ -456,9 +458,6 @@ void PrintSupportedArchitectures () {
 
         if (result) {
             const auto n = result / sizeof (SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION);
-
-            // std::sort (&machines [0], &machines [n],
-                       //[] (auto & a, auto & b) { return a.Machine > b.Machine; });
             std::qsort (machines, n, 4,
                         [] (const void * a, const void * b) -> int {
                             return ((const SYSTEM_SUPPORTED_PROCESSOR_ARCHITECTURES_INFORMATION *) a)->Machine
@@ -857,14 +856,23 @@ void ResetTextColor () {
 }
 
 void InitArguments () {
-    std::wstring_view cmdline (GetCommandLine ());
-    cmdline.remove_prefix (cmdline.find_last_of (L'"') + 1); // skip until last quote, if any
-    if (auto argoffset = cmdline.rfind (L" -") + 1) { // any arguments?
-        cmdline.remove_prefix (argoffset + 1);
-        args = cmdline;
+    int startupinfo;
+    wchar_t ** wenviron;
+    __wgetmainargs (&argc, &argv, &wenviron, 0, &startupinfo);
+
+    for (auto i = 1; i < argc; ++i) {
+        while (*argv [i] == L'-' || *argv [i] == L'/') { // skip dashes and slashes
+            ++argv [i];
+        }
     }
 }
 
 bool IsOptionPresent (wchar_t c) {
-    return args.contains (c) || args.contains (L'a');
+    for (auto i = 1; i < argc; ++i) {
+        for (auto a = argv [i]; *a; ++a) {
+            if (*a == 'a' || *a == c)
+                return true;
+        }
+    }
+    return false;
 }
