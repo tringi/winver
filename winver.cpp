@@ -41,8 +41,8 @@ DWORD major = 0;
 DWORD minor = 0;
 DWORD build = 0;
 
-int argc;
 wchar_t ** argv;
+int argc;
 
 bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
@@ -319,14 +319,23 @@ void PrintNumber (T number, int base, int digits) {
 }
 
 UINT GetFileBuildNumber (const char * filename) {
-    auto cb = GetFileVersionInfoSizeA (filename, NULL);
-    if (auto data = LocalAlloc (LMEM_FIXED, cb)) {
-        if (GetFileVersionInfoA (filename, 0, cb, data)) {
+    static char data [3072];
+    if (auto hVersionDLL = LoadLibraryA ("VERSION")) {
 
-            VS_FIXEDFILEINFO * info = NULL;
-            UINT infolen = sizeof info;
-            if (VerQueryValueA (data, "\\", (LPVOID *) &info, &infolen)) {
-                return LOWORD (info->dwProductVersionLS);
+        BOOL (APIENTRY * ptrGetFileVersionInfoA) (_In_ LPCSTR, _Reserved_ DWORD, _In_ DWORD dwLen, _Out_writes_bytes_ (dwLen) LPVOID) = NULL;
+        BOOL (APIENTRY * ptrVerQueryValueA) (_In_ LPCVOID, _In_ LPCSTR, LPVOID * lplpBuffer, _Out_ PUINT puLen) = NULL;
+
+        if (Windows::Symbol (hVersionDLL, ptrGetFileVersionInfoA, "GetFileVersionInfoA")) {
+            if (ptrGetFileVersionInfoA (filename, 0, sizeof data, data)) {
+
+                VS_FIXEDFILEINFO * info = NULL;
+                UINT infolen = sizeof info;
+
+                if (Windows::Symbol (hVersionDLL, ptrVerQueryValueA, "VerQueryValueA")) {
+                    if (ptrVerQueryValueA (data, "\\", (LPVOID *) &info, &infolen)) {
+                        return LOWORD (info->dwProductVersionLS);
+                    }
+                }
             }
         }
     }
