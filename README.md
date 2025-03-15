@@ -41,13 +41,13 @@ While regular `ver` shows just this bland:
     Azure Stack HCI [Version 23H2 10.0.25398.584] 64-bit
 
 Command-line parameters added to display additional information:  
-*must be stacked, e.g.: `-ob` not `-o -b`*
+*may be passed both distinct `-l -o` or stacked `-lo`*
 
 * `-a` displays ALL additional informations
 * `-b` displays full build string, e.g.: `14393.6611.amd64fre.rs1_release.231218-1733`
 * `-l` displays expiration/licensing/activation status
 * `-o` displays *Licensed to User/Organization* information, just like winver.exe
-* `-i` displays supported architectures (AArch(64/32), x86-(64/32)) and whether they are native, emulated or WoW64
+* `-i` displays supported architectures and whether they are native, emulated or WoW64
 * `-u` displays uptime, e.g.: `Uptime: 1y 123d 23:01:59`
 
 ## Requirements
