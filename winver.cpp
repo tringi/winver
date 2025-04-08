@@ -88,8 +88,16 @@ __declspec (noreturn) void main () {
     InitPrint ();
     InitArguments ();
     InitVersionNumbers ();
-    RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_WOW64_64KEY | KEY_QUERY_VALUE, &hKey);
-    RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Virtual Machine\\Guest\\Parameters", 0, KEY_WOW64_64KEY | KEY_QUERY_VALUE | KEY_NOTIFY, &hVmKey);
+
+    DWORD dwRegFlags = KEY_QUERY_VALUE;
+#ifndef _WIN64
+    if (major > 5 || (major == 5 && minor >= 2)) {
+        dwRegFlags |= KEY_WOW64_64KEY;
+    }
+#endif
+    RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, dwRegFlags, &hKey);
+    dwRegFlags |= KEY_NOTIFY;
+    RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Virtual Machine\\Guest\\Parameters", 0, dwRegFlags, &hVmKey);
 
     build &= 0x0FFF'FFFF;
     colors = GetConsoleColors ();
@@ -555,19 +563,19 @@ void PrintSupportedArchitectures () {
     }
 
 #ifndef _M_ARM64
+    PrintRsrc (13);
+
+#ifdef _WIN64
+    Print ("x86-64");
+    Print (", ");
+    Print ("x86-32");
+    Print (" (");
+    Print ("WoW64");
+    Print (')');
+#else
     BOOL wow = FALSE;
     BOOL (WINAPI * ptrIsWow64Process) (HANDLE, BOOL *) = NULL;
     if (Windows::Symbol (hKernel32, ptrIsWow64Process, "IsWow64Process")) {
-        PrintRsrc (13);
-
-#ifdef _WIN64
-        Print ("x86-64");
-        Print (", ");
-        Print ("x86-32");
-        Print (" (");
-        Print ("WoW64");
-        Print (')');
-#else
         if (ptrIsWow64Process ((HANDLE) -1, &wow) && wow) {
             Print ("x86-64");
             Print (", ");
@@ -578,9 +586,11 @@ void PrintSupportedArchitectures () {
         } else {
             Print ("x86-32");
         }
-#endif
-        Print ("\r\n");
+    } else {
+        Print ("x86-32");
     }
+#endif
+    Print ("\r\n");
 #endif
 }
 
@@ -905,10 +915,18 @@ void Print (wchar_t c) {
     }
 }
 void PrintRsrc (unsigned int id) {
+#ifdef _WIN64
+    // Windows 2000+
     const wchar_t * string = nullptr;
     if (auto length = LoadString (reinterpret_cast <HINSTANCE> (&__ImageBase), id, (LPWSTR) &string, 0)) {
         Print (string, length);
     }
+#else
+    // This is needed on NT4
+    wchar_t buffer [256];
+    auto length = LoadString (reinterpret_cast <HINSTANCE> (&__ImageBase), id, buffer, sizeof buffer / sizeof buffer [0]);
+    Print (buffer, length);
+#endif
 }
 
 void PrintElapse (std::uint64_t t, bool seconds) {
