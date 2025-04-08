@@ -165,7 +165,7 @@
       <Command>lib.exe /nologo /MACHINE:$(PlatformTarget) /def:lib/msvcrt.def /out:lib/msvcrt.lib</Command>
     </PreLinkEvent>
     <PostBuildEvent>
-      <Command>"$(SolutionDir)tools\setpeosver.exe" 5.0 $(TargetDir)$(AssemblyName).com</Command>
+      <Command>"$(SolutionDir)tools\setpeosver.exe" 4.0 $(TargetDir)$(AssemblyName).com</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -222,7 +222,7 @@
       <Command>lib.exe /nologo /MACHINE:$(PlatformTarget) /def:lib/msvcrt.def /out:lib/msvcrt.lib</Command>
     </PreLinkEvent>
     <PostBuildEvent>
-      <Command>"$(SolutionDir)tools\setpeosver.exe" 5.0 $(TargetDir)$(AssemblyName).com</Command>
+      <Command>"$(SolutionDir)tools\setpeosver.exe" 4.0 $(TargetDir)$(AssemblyName).com</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">

@@ -1,5 +1,6 @@
 #include <Windows.h>
 #include <slpublic.h>
+#include <intrin.h>
 
 #include <charconv>
 #include <cstddef>
@@ -32,6 +33,7 @@ std::size_t Convert (const char * in, _Out_writes_z_ (N) wchar_t (&out) [N]) {
 }
 
 HKEY hKey = NULL;
+HKEY hVmKey = NULL;
 HANDLE out = NULL;
 HMODULE hKernel32 = NULL;
 bool  file = false;
@@ -47,11 +49,13 @@ int argc;
 bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
 bool PrintValueFromRegistry (const char * value, char prefix = 0);
+bool PrintValueFromRegistry (HKEY hKey, const char * value, char prefix = 0);
 void PrintUserInformation ();
 void PrintSupportedArchitectures ();
 void PrintOsArchitecture ();
 void PrintLicenseStatus ();
 void PrintExpiration ();
+void PrintHypervisorInfo ();
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 extern "C" void WINAPI RtlGetNtVersionNumbers (LPDWORD, LPDWORD, LPDWORD); // NTDLL 5.1
@@ -84,7 +88,8 @@ __declspec (noreturn) void main () {
     InitPrint ();
     InitArguments ();
     InitVersionNumbers ();
-    RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_QUERY_VALUE, &hKey);
+    RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, KEY_WOW64_64KEY | KEY_QUERY_VALUE, &hKey);
+    RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Virtual Machine\\Guest\\Parameters", 0, KEY_WOW64_64KEY | KEY_QUERY_VALUE | KEY_NOTIFY, &hVmKey);
 
     build &= 0x0FFF'FFFF;
     colors = GetConsoleColors ();
@@ -186,6 +191,15 @@ __declspec (noreturn) void main () {
         PrintSupportedArchitectures ();
     }
 
+    // winver.com -h
+    //  - No Hyper-V virtualization
+    //  - Hyper-V Primary partition
+    //  - Virtualized. Parent Hyper-V partition: 
+
+    if (IsOptionPresent (L'h')) {
+        PrintHypervisorInfo ();
+    }
+
     if (IsOptionPresent (L'c')) {
         // CPUID, arch, SSE,AVX,etc...
     }
@@ -196,9 +210,6 @@ __declspec (noreturn) void main () {
         // 8 GB of Hyper-V Maximum Assigned Memory
     }
 
-    // TODO: hypervisor info?
-    // TODO: ?? memory size and OS bitness (3GT)
-    // TODO: ?? processors and levels, architectures, SSE,AVX,etc...
     // TODO: ?? disk size and free space
 
     ExitProcess (0);
@@ -238,15 +249,15 @@ std::size_t GetRegistryString (const char * avalue, wchar_t * buffer, std::size_
     return false;
 }
 
-bool PrintValueFromRegistry (const char * avalue, char prefix) {
-    if (hKey) {
+bool PrintValueFromRegistry (HKEY h, const char * avalue, char prefix) {
+    if (h) {
         wchar_t value [256];
         Convert (avalue, value);
 
         wchar_t text [512];
         DWORD size = sizeof text;
         DWORD type = 0;
-        if (RegQueryValueEx (hKey, value, NULL, &type, (LPBYTE) text, &size) == ERROR_SUCCESS) {
+        if (RegQueryValueEx (h, value, NULL, &type, (LPBYTE) text, &size) == ERROR_SUCCESS) {
             switch (type) {
                 case REG_DWORD:
                 case REG_QWORD:
@@ -268,6 +279,10 @@ bool PrintValueFromRegistry (const char * avalue, char prefix) {
         }
     }
     return false;
+}
+
+bool PrintValueFromRegistry (const char * avalue, char prefix) {
+    return PrintValueFromRegistry (hKey, avalue, prefix);
 }
 
 void PrintUserInformation () {
@@ -342,17 +357,20 @@ UINT GetFileBuildNumber (const char * filename) {
     return 0;
 }
 
-void ShowVersionNumbers () {
-    if (major == 10 && minor == 0) {
+void ShowVersionNumbersBase (DWORD m, DWORD n, DWORD b) {
+    if (m == 10 && n == 0) {
         SetTextColor (8);
     }
-    PrintNumber (major);
+    PrintNumber (m);
     Print (L'.');
-    PrintNumber (minor);
+    PrintNumber (n);
     Print (L'.');
     ResetTextColor ();
-    PrintNumber (build);
+    PrintNumber (b);
+}
 
+void ShowVersionNumbers () {
+    ShowVersionNumbersBase (major, minor, build);
     if (!PrintValueFromRegistry ("UBR", '.')) {
 #ifndef _M_ARM64
         wchar_t text [128];
@@ -734,6 +752,90 @@ void PrintLicenseStatus () {
                 Print ("\r\n");
             }
         }
+    }
+#endif
+}
+
+#ifndef _M_ARM64
+struct HV_VENDOR_AND_MAX_FUNCTION {
+    UINT MaxFunction;
+    UCHAR VendorName [12];
+};
+struct HV_HYPERVISOR_VERSION_INFO {
+    UINT BuildNumber;
+    UINT MinorVersion : 16;
+    UINT MajorVersion : 16;
+    UINT ServicePack;
+    UINT ServiceNumber : 24;
+    UINT ServiceBranch : 8;
+};
+
+bool IsHypervisorInstalled (char * vendor, HV_HYPERVISOR_VERSION_INFO * info, UINT * partition) {
+    int registers [4];
+
+    __cpuid (registers, 0);
+    const auto maximum_eax = registers [0];
+    if (maximum_eax >= 1u) {
+
+        __cpuid (registers, 1);
+        if (registers [2] & (1 << 31)) { // RAZ (Hyper-V)
+
+            __cpuid (registers, 0x40000000);
+            const auto maximum_hv = registers [0];
+
+            // extract hypervisor name
+
+            const auto p = reinterpret_cast <HV_VENDOR_AND_MAX_FUNCTION *> (registers)->VendorName;
+            for (auto i = 0u; i != sizeof HV_VENDOR_AND_MAX_FUNCTION::VendorName; ++i) {
+                if (i >= 32 && i < 127) {
+                    *vendor++ = p [i];
+                }
+            }
+            *vendor = '\0';
+
+            // version
+
+            if (maximum_hv >= 0x40000002) {
+                __cpuid (registers, 0x40000002);
+                *info = *reinterpret_cast <HV_HYPERVISOR_VERSION_INFO *> (registers);
+            }
+
+            // flags
+
+            if (maximum_hv >= 0x40000003) {
+                __cpuid (registers, 0x40000003);
+
+                // privileges are 3fff or above on primary partition, 2e7f on limited VM (1607)
+
+                if ((registers [0] & 0x3FFF) == 0x3FFF) {
+                    *partition = 1; // primary
+                } else {
+                    *partition = 2;
+                    //this->currentVmHost.vmId
+                }
+            }
+        }
+    }
+
+    return false;
+}
+#endif
+
+
+void PrintHypervisorInfo () {
+    if (hVmKey) {
+        //PrintValueFromRegistry (hVmKey, "VirtualMachineId");
+    }
+
+    // TSGetServiceSessionId / WTSIsServerContainer
+
+#ifndef _M_ARM64
+    HV_HYPERVISOR_VERSION_INFO info;
+    UINT partition = 0;
+    char vendor [13];
+
+    if (IsHypervisorInstalled (vendor, &info, &partition)) {
+
     }
 #endif
 }
