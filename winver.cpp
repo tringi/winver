@@ -117,7 +117,33 @@ __declspec (noreturn) void main () {
 
         if (major < 10 || !ShowBrandingFromAPI ()) {
             if (!PrintValueFromRegistry ("ProductName")) {
-                PrintRsrc (1);
+
+                OSVERSIONINFOEX os;
+                os.dwOSVersionInfoSize = sizeof os;
+                if (GetVersionEx ((OSVERSIONINFO *) &os)) {
+                    switch (os.dwPlatformId) {
+                        default:
+                        case VER_PLATFORM_WIN32_WINDOWS:
+                            // 9x
+                            Print ("Windows 9x");
+                            break;
+                        case VER_PLATFORM_WIN32_NT:
+                            // NT
+                            switch (os.wProductType) {
+                                case VER_NT_SERVER:
+                                case VER_NT_DOMAIN_CONTROLLER:
+                                    Print ("Windows NT Server");
+                                    break;
+                                default:
+                                case VER_NT_WORKSTATION:
+                                    Print ("Windows NT");
+                                    break;
+                            }
+                            break;
+                    }
+                } else {
+                    PrintRsrc (1);
+                }
             }
         }
 
@@ -665,6 +691,8 @@ void PrintLicenseStatus () {
                                                 BYTE * data;
                                                 SLDATATYPE type;
 
+                                                bool display_grace_info = true;
+
                                                 if (Windows::Symbol (hSlcDLL, ptrSLGetLicensingStatusInformation, "SLGetLicensingStatusInformation")) {
 
                                                     UINT nLicensingStatus;
@@ -682,8 +710,10 @@ void PrintLicenseStatus () {
                                                                 case SL_LICENSING_STATUS_NOTIFICATION: SetTextColor (14); break;
                                                             }
                                                             switch (thisLicensingStatus->eStatus) {
-                                                                case SL_LICENSING_STATUS_UNLICENSED:
                                                                 case SL_LICENSING_STATUS_LICENSED:
+                                                                    display_grace_info = false;
+                                                                    [[ fallthrough ]];
+                                                                case SL_LICENSING_STATUS_UNLICENSED:
                                                                 case SL_LICENSING_STATUS_IN_GRACE_PERIOD:
                                                                 case SL_LICENSING_STATUS_NOTIFICATION:
                                                                 case SL_LICENSING_STATUS_LAST:
@@ -708,12 +738,14 @@ void PrintLicenseStatus () {
                                                     }
                                                 }
 
-                                                if (Windows::Symbol (hSlcDLL, ptrSLGetApplicationInformation, "SLGetApplicationInformation")) {
-                                                    if (SUCCEEDED (ptrSLGetApplicationInformation (hSlc, pAppId, L"RemainingRearmCount", &type, &size, &data))) {
-                                                        if (type == SL_DATA_DWORD) {
-                                                            PrintRsrc (12);
-                                                            PrintNumber (*(DWORD *) data);
-                                                            Print ("\r\n");
+                                                if (display_grace_info) {
+                                                    if (Windows::Symbol (hSlcDLL, ptrSLGetApplicationInformation, "SLGetApplicationInformation")) {
+                                                        if (SUCCEEDED (ptrSLGetApplicationInformation (hSlc, pAppId, L"RemainingRearmCount", &type, &size, &data))) {
+                                                            if (type == SL_DATA_DWORD) {
+                                                                PrintRsrc (12);
+                                                                PrintNumber (*(DWORD *) data);
+                                                                Print ("\r\n");
+                                                            }
                                                         }
                                                     }
                                                 }
