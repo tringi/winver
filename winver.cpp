@@ -117,6 +117,7 @@ __declspec (noreturn) void main () {
 
         if (major < 10 || !ShowBrandingFromAPI ()) {
             if (!PrintValueFromRegistry ("ProductName")) {
+                Print ("Windows");
 
                 OSVERSIONINFOEX os;
                 os.dwOSVersionInfoSize = sizeof os;
@@ -125,24 +126,19 @@ __declspec (noreturn) void main () {
                         default:
                         case VER_PLATFORM_WIN32_WINDOWS:
                             // 9x
-                            Print ("Windows 9x");
+                            Print (" 9x");
                             break;
                         case VER_PLATFORM_WIN32_NT:
                             // NT
+                            Print (" NT");
                             switch (os.wProductType) {
                                 case VER_NT_SERVER:
                                 case VER_NT_DOMAIN_CONTROLLER:
-                                    Print ("Windows NT Server");
-                                    break;
-                                default:
-                                case VER_NT_WORKSTATION:
-                                    Print ("Windows NT");
+                                    Print (" Server");
                                     break;
                             }
                             break;
                     }
-                } else {
-                    PrintRsrc (1);
                 }
             }
         }
