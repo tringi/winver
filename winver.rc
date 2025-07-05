@@ -5,9 +5,9 @@ LANGUAGE LANG_ENGLISH, SUBLANG_DEFAULT
 BEGIN
     1   ""
     2   "Version "
-    3   "\r\nLicensed to:\r\n"
+    3   "Licensed to:\r\n"
     4   "    "
-    5   "\r\nUptime: "
+    5   "Uptime: "
     6   "y "
     7   "d "
     8   "Expires "
@@ -15,16 +15,25 @@ BEGIN
     10  "Total grace days: "
     11  "Remaining grace time: "
     12  "Remaining rearm count: "
-    13  "\r\nSupported architectures: "
-
-    0x10 "Genuine"
-    0x11 "Unlicensed"
-    0x12 "Tampered"
-    0x13 "Offline"
+    13  "Supported architectures: "
+    14  "Installed languages: "
+    15  " (current)"
+    16  " (system)"
 
     0x20 "Unlicensed"
     0x21 "Activated" // Licensed
     0x22 "OOB Grace Period"
     0x23 "Not activated" // Extended Grace Period
     0x24 "OOT Grace Period"
+
+    0x2A "Genuine"
+    0x2B "Unlicensed"
+    0x2C "Tampered"
+    0x2D "Offline"
+
+    0x30 "Virtualization firmware: "
+    0x31 "not enabled or available\r\n"
+    0x32 "enabled and available\r\n"
+    0x33 "Hyper-V"
+    0x34 "No Hyper-V virtualization"
 END

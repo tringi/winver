@@ -12,9 +12,9 @@
 	companyname		= TRIM CORE SOFTWARE s.r.o.
 
 	major = 0
-	minor = 6
-	patch = 3
-	build = 545
+	minor = 7
+	patch = 0
+	build = 590
 
 [versioninfo]
 	filename	= %dir%\%internalname%-vi.rc

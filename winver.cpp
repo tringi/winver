@@ -14,6 +14,7 @@ void Print (wchar_t c);
 void Print (const wchar_t * text);
 void Print (const wchar_t * text, std::size_t length);
 void Print (const char * text);
+void PrintNewline ();
 void PrintRsrc (unsigned int);
 template <typename T>
 void PrintNumber (T number, int base, int digits);
@@ -51,6 +52,7 @@ void ShowVersionNumbers ();
 bool PrintValueFromRegistry (const char * value, char prefix = 0);
 bool PrintValueFromRegistry (HKEY hKey, const char * value, char prefix = 0);
 void PrintUserInformation ();
+void PrintSupportedLanguages ();
 void PrintSupportedArchitectures ();
 void PrintOsArchitecture ();
 void PrintLicenseStatus ();
@@ -107,7 +109,7 @@ __declspec (noreturn) void main () {
     // winver.com -a
 
     if (argc <= 1 || IsOptionPresent ('a')) {
-        Print ("\r\n");
+        PrintNewline ();
 
         // Windows 11 Pro Insider Preview
         // Windows 10 Enterprise N 2016 LTSB
@@ -161,7 +163,7 @@ __declspec (noreturn) void main () {
 #else
         Print ("] ");
         PrintOsArchitecture ();
-        Print ("\r\n");
+        PrintNewline ();
 #endif
     }
 
@@ -171,7 +173,8 @@ __declspec (noreturn) void main () {
     if (IsOptionPresent (L'b')) {
         SetTextColor (8);
         if (PrintValueFromRegistry ("BuildLabEx") || PrintValueFromRegistry ("BuildLab")) {
-            Print ("\r\n");
+            PrintNewline ();
+            PrintNewline ();
         }
         ResetTextColor ();
     }
@@ -205,6 +208,7 @@ __declspec (noreturn) void main () {
     if (IsOptionPresent (L'l')) {
         PrintExpiration ();
         PrintLicenseStatus ();
+        PrintNewline ();
     }
 
     // winver.com -o
@@ -212,6 +216,14 @@ __declspec (noreturn) void main () {
 
     if (IsOptionPresent (L'o')) {
         PrintUserInformation ();
+        PrintNewline ();
+    }
+
+    // winver.com -n
+    //  - Supported languages: cs-CZ, en-US
+
+    if (IsOptionPresent (L'n')) {
+        PrintSupportedLanguages ();
     }
 
     // winver.com -i
@@ -219,6 +231,7 @@ __declspec (noreturn) void main () {
 
     if (IsOptionPresent (L'i')) {
         PrintSupportedArchitectures ();
+        PrintNewline ();
     }
 
     // winver.com -h
@@ -228,6 +241,7 @@ __declspec (noreturn) void main () {
 
     if (IsOptionPresent (L'h')) {
         PrintHypervisorInfo ();
+        PrintNewline ();
     }
 
     if (IsOptionPresent (L'c')) {
@@ -330,12 +344,12 @@ void PrintUserInformation () {
             if (nowner) {
                 PrintRsrc (4);
                 Print (owner, nowner);
-                Print ("\r\n");
+                PrintNewline ();
             }
             if (norganization) {
                 PrintRsrc (4);
                 Print (organization, norganization);
-                Print ("\r\n");
+                PrintNewline ();
             }
         }
     }
@@ -476,6 +490,77 @@ void PrintOsArchitecture () {
 }
 #endif
 
+void PrintSupportedLanguages () {
+    struct Args {
+        wchar_t user [30];
+        wchar_t system [30];
+        unsigned i;
+        unsigned n;
+    } args = {};
+
+#ifndef _M_ARM64
+    int (WINAPI * ptrGetUserDefaultLocaleName) (_Out_writes_ (cchLocaleName) LPWSTR lpLocaleName, _In_ int cchLocaleName) = NULL;
+    if (Windows::Symbol (hKernel32, ptrGetUserDefaultLocaleName, "GetUserDefaultLocaleName")) {
+        ptrGetUserDefaultLocaleName (args.user, sizeof args.user / sizeof args.user [0]);
+    }
+    int (WINAPI * ptrGetSystemDefaultLocaleName) (_Out_writes_ (cchLocaleName) LPWSTR lpLocaleName, _In_ int cchLocaleName) = NULL;
+    if (Windows::Symbol (hKernel32, ptrGetSystemDefaultLocaleName, "GetSystemDefaultLocaleName")) {
+        ptrGetSystemDefaultLocaleName (args.system, sizeof args.system / sizeof args.system [0]);
+    }
+#else
+    GetUserDefaultLocaleName (args.user, sizeof args.user / sizeof args.user [0]);
+    GetSystemDefaultLocaleName (args.system, sizeof args.system / sizeof args.system [0]);
+#endif
+
+#ifndef _WIN64
+    BOOL (WINAPI * ptrEnumUILanguagesW) (_In_ UILANGUAGE_ENUMPROCW lpUILanguageEnumProc,
+                                         _In_ DWORD dwFlags, _In_ LONG_PTR lParam);
+    if (Windows::Symbol (hKernel32, ptrEnumUILanguagesW, "EnumUILanguagesW")) {
+#else
+        auto ptrEnumUILanguagesW = EnumUILanguagesW;
+#endif
+        ptrEnumUILanguagesW ([] (LPWSTR name, LONG_PTR lParam) {
+                                    ++((Args *) lParam)->n;
+                                    return TRUE;
+                             }, MUI_LANGUAGE_NAME, (LONG_PTR) &args);
+
+        if (args.n) {
+            PrintRsrc (14);
+            ptrEnumUILanguagesW ([] (LPWSTR name, LONG_PTR lParam) {
+                                        auto & args = *(Args *) lParam;
+                                        if (args.i++) {
+                                            Print (", ");
+                                        }
+                                        if (!file) {
+                                            if (std::wcscmp (name, args.user) == 0) {
+                                                SetTextColor (11);
+                                            } else
+                                            if (std::wcscmp (name, args.system) == 0 && args.n >= 3) {
+                                                SetTextColor (15);
+                                            }
+                                        }
+
+                                        Print (name);
+
+                                        if (file) {
+                                            if (std::wcscmp (name, args.user) == 0) {
+                                                PrintRsrc (15);
+                                            }
+                                            if (std::wcscmp (name, args.system) == 0) {
+                                                PrintRsrc (16);
+                                            }
+                                        }
+
+                                        ResetTextColor ();
+                                        return TRUE;
+                                 }, MUI_LANGUAGE_NAME, (LONG_PTR) &args);
+            PrintNewline ();
+        }
+#ifndef _WIN64
+    }
+#endif
+}
+
 void PrintSupportedArchitectures () {
     typedef enum _SYSTEM_INFORMATION_CLASS {
         SystemSupportedProcessorArchitectures = 181,
@@ -531,17 +616,25 @@ void PrintSupportedArchitectures () {
                     }
                     first = false;
 
+                    if (machine.Native) {
+                        SetTextColor (11);
+                    }
                     switch (machine.Machine) {
                         case IMAGE_FILE_MACHINE_I386: Print ("x86-32"); break;
                         case IMAGE_FILE_MACHINE_ARMNT: Print ("AArch32"); break;
                         case IMAGE_FILE_MACHINE_AMD64: Print ("x86-64"); break;
                         case IMAGE_FILE_MACHINE_ARM64: Print ("AArch64"); break;
+                        case IMAGE_FILE_MACHINE_IA64: Print ("IA-64"); break;
+                    }
+                    if (machine.Native) {
+                        ResetTextColor ();
                     }
 
                     bool wow64 = !!machine.WoW64Container;
                     bool emulated = !machine.Native;
 
                     if (oldAPI) {
+                        // if (machine.Machine == IMAGE_FILE_MACHINE_IA64
                         wow64 = emulated;
                         emulated = false;
                     } else {
@@ -578,8 +671,7 @@ void PrintSupportedArchitectures () {
                     }
                 }
             }
-
-            Print ("\r\n");
+            PrintNewline ();
             return;
         }
     }
@@ -612,7 +704,7 @@ void PrintSupportedArchitectures () {
         Print ("x86-32");
     }
 #endif
-    Print ("\r\n");
+    PrintNewline ();
 #endif
 }
 
@@ -631,7 +723,7 @@ void PrintExpiration () {
                         Print (L' ');
                         Print (buffer, length);
                     }
-                    Print ("\r\n");
+                    PrintNewline ();
                 }
             }
         }
@@ -719,12 +811,12 @@ void PrintLicenseStatus () {
                                                                     PrintNumber ((UINT) thisLicensingStatus->eStatus);
                                                             }
                                                             ResetTextColor ();
-                                                            Print ("\r\n");
+                                                            PrintNewline ();
 
                                                             if (thisLicensingStatus->dwTotalGraceDays) {
                                                                 PrintRsrc (10);
                                                                 PrintNumber (thisLicensingStatus->dwTotalGraceDays);
-                                                                Print ("\r\n");
+                                                                PrintNewline ();
                                                             }
                                                             if (thisLicensingStatus->dwGraceTime) {
                                                                 PrintRsrc (11);
@@ -740,7 +832,7 @@ void PrintLicenseStatus () {
                                                             if (type == SL_DATA_DWORD) {
                                                                 PrintRsrc (12);
                                                                 PrintNumber (*(DWORD *) data);
-                                                                Print ("\r\n");
+                                                                PrintNewline ();
                                                             }
                                                         }
                                                     }
@@ -781,13 +873,13 @@ void PrintLicenseStatus () {
                     case SL_GEN_STATE_INVALID_LICENSE:
                     case SL_GEN_STATE_TAMPERED:
                     case SL_GEN_STATE_OFFLINE:
-                        PrintRsrc (0x10 + (UINT) state);
+                        PrintRsrc (0x2A + (UINT) state);
                         break;
                     default:
                         PrintNumber ((UINT) state);
                 }
                 ResetTextColor ();
-                Print ("\r\n");
+                PrintNewline ();
             }
         }
     }
@@ -861,9 +953,8 @@ bool IsHypervisorInstalled (char * vendor, HV_HYPERVISOR_VERSION_INFO * info, UI
 
 
 void PrintHypervisorInfo () {
-    if (hVmKey) {
-        //PrintValueFromRegistry (hVmKey, "VirtualMachineId");
-    }
+    PrintRsrc (0x30);
+    PrintRsrc (0x31 + !!IsProcessorFeaturePresent (PF_VIRT_FIRMWARE_ENABLED));
 
     // TSGetServiceSessionId / WTSIsServerContainer
 
@@ -873,9 +964,31 @@ void PrintHypervisorInfo () {
     char vendor [13];
 
     if (IsHypervisorInstalled (vendor, &info, &partition)) {
-
+        
     }
+#else
+    PrintValueFromRegistry (hVmKey, "HypervisorMajorVersion");
+    PrintValueFromRegistry (hVmKey, "HypervisorMinorVersion");
+    PrintValueFromRegistry (hVmKey, "HypervisorBuildNumber");
+
 #endif
+
+    PrintNewline ();
+
+    //  - Hyper-V Primary partition
+    //  - Virtualized. Parent Hyper-V partition: 
+    if (hVmKey) {
+        PrintRsrc (0x33);
+        /*PrintValueFromRegistry (hVmKey, "VirtualMachineName");
+        PrintValueFromRegistry (hVmKey, "VirtualMachineId");
+        PrintValueFromRegistry (hVmKey, "HostName");*/
+        PrintNewline ();
+    } else {
+#ifdef _M_ARM64
+        PrintRsrc (0x34);
+        PrintNewline ();
+#endif
+    }
 }
 
 void InitPrint () {
@@ -908,7 +1021,7 @@ void InitPrint () {
 
 void Print (const char * text) {
     wchar_t buffer [3072];
-    Convert (text, buffer); // TODO: lenghht
+    Convert (text, buffer); // TODO: length
     return Print (buffer);
 }
 
@@ -930,7 +1043,9 @@ void Print (const wchar_t * text, std::size_t length) {
         WriteConsole (out, text, (DWORD) length, &wtn, NULL);
     }
 }
-
+void PrintNewline () {
+    Print (L"\r\n", 2);
+}
 void Print (const wchar_t * text) {
     Print (text, wcslen (text));
 }
@@ -985,7 +1100,7 @@ void PrintElapse (std::uint64_t t, bool seconds) {
         Print (L':');
         PrintNumber (ss, 10, 2);
     }
-    Print ("\r\n");
+    PrintNewline ();
 }
 
 UCHAR GetConsoleColors () {
