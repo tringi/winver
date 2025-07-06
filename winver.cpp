@@ -57,6 +57,7 @@ void PrintSupportedArchitectures ();
 void PrintOsArchitecture ();
 void PrintLicenseStatus ();
 void PrintExpiration ();
+void PrintIsolationInfo ();
 void PrintHypervisorInfo ();
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
@@ -98,7 +99,6 @@ __declspec (noreturn) void main () {
     }
 #endif
     RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0, dwRegFlags, &hKey);
-    dwRegFlags |= KEY_NOTIFY;
     RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Virtual Machine\\Guest\\Parameters", 0, dwRegFlags, &hVmKey);
 
     build &= 0x0FFF'FFFF;
@@ -231,7 +231,6 @@ __declspec (noreturn) void main () {
 
     if (IsOptionPresent (L'i')) {
         PrintSupportedArchitectures ();
-        PrintNewline ();
     }
 
     // winver.com -h
@@ -240,8 +239,8 @@ __declspec (noreturn) void main () {
     //  - Virtualized. Parent Hyper-V partition: 
 
     if (IsOptionPresent (L'h')) {
+        PrintIsolationInfo ();
         PrintHypervisorInfo ();
-        PrintNewline ();
     }
 
     if (IsOptionPresent (L'c')) {
@@ -900,7 +899,7 @@ struct HV_HYPERVISOR_VERSION_INFO {
     UINT ServiceBranch : 8;
 };
 
-bool IsHypervisorInstalled (char * vendor, HV_HYPERVISOR_VERSION_INFO * info, UINT * partition) {
+UINT IsHypervisorPresent (char * vendor, HV_HYPERVISOR_VERSION_INFO * info) {
     int registers [4];
 
     __cpuid (registers, 0);
@@ -915,13 +914,15 @@ bool IsHypervisorInstalled (char * vendor, HV_HYPERVISOR_VERSION_INFO * info, UI
 
             // extract hypervisor name
 
-            const auto p = reinterpret_cast <HV_VENDOR_AND_MAX_FUNCTION *> (registers)->VendorName;
-            for (auto i = 0u; i != sizeof HV_VENDOR_AND_MAX_FUNCTION::VendorName; ++i) {
-                if (i >= 32 && i < 127) {
-                    *vendor++ = p [i];
+            if (vendor) {
+                const auto p = reinterpret_cast <HV_VENDOR_AND_MAX_FUNCTION *> (registers)->VendorName;
+                for (auto i = 0u; i != sizeof HV_VENDOR_AND_MAX_FUNCTION::VendorName; ++i) {
+                    if (i >= 32 && i < 127) {
+                        *vendor++ = p [i];
+                    }
                 }
+                *vendor = '\0';
             }
-            *vendor = '\0';
 
             // version
 
@@ -938,56 +939,137 @@ bool IsHypervisorInstalled (char * vendor, HV_HYPERVISOR_VERSION_INFO * info, UI
                 // privileges are 3fff or above on primary partition, 2e7f on limited VM (1607)
 
                 if ((registers [0] & 0x3FFF) == 0x3FFF) {
-                    *partition = 1; // primary
+                    return 1; // primary
                 } else {
-                    *partition = 2;
-                    //this->currentVmHost.vmId
+                    return 2;
                 }
             }
         }
     }
 
-    return false;
+    return 0;
 }
 #endif
 
-
 void PrintHypervisorInfo () {
-    PrintRsrc (0x30);
-    PrintRsrc (0x31 + !!IsProcessorFeaturePresent (PF_VIRT_FIRMWARE_ENABLED));
-
-    // TSGetServiceSessionId / WTSIsServerContainer
+    const bool pfvirt = IsProcessorFeaturePresent (PF_VIRT_FIRMWARE_ENABLED);
+    const bool pfslat = IsProcessorFeaturePresent (PF_SECOND_LEVEL_ADDRESS_TRANSLATION);
 
 #ifndef _M_ARM64
     HV_HYPERVISOR_VERSION_INFO info;
-    UINT partition = 0;
-    char vendor [13];
-
-    if (IsHypervisorInstalled (vendor, &info, &partition)) {
-        
-    }
+    const UINT raz = IsHypervisorPresent (nullptr, &info);
 #else
-    PrintValueFromRegistry (hVmKey, "HypervisorMajorVersion");
-    PrintValueFromRegistry (hVmKey, "HypervisorMinorVersion");
-    PrintValueFromRegistry (hVmKey, "HypervisorBuildNumber");
-
+    const bool raz = false;
 #endif
 
-    PrintNewline ();
+    PrintRsrc (0x30);
 
-    //  - Hyper-V Primary partition
-    //  - Virtualized. Parent Hyper-V partition: 
-    if (hVmKey) {
-        PrintRsrc (0x33);
-        /*PrintValueFromRegistry (hVmKey, "VirtualMachineName");
-        PrintValueFromRegistry (hVmKey, "VirtualMachineId");
-        PrintValueFromRegistry (hVmKey, "HostName");*/
+    if (raz || hVmKey != NULL || pfvirt || pfslat) {
+
+        if (pfvirt || pfslat || raz) {
+            if (hVmKey != NULL) {
+                PrintRsrc (0x33);
+            }
+            if (pfvirt) {
+                PrintRsrc (0x32);
+                if (pfslat || raz) {
+                    Print (", ");
+                }
+            }
+            if (raz) {
+                if (raz == 2) {
+                    PrintRsrc (0x3B);
+                } else {
+                    PrintRsrc (0x3A);
+                }
+                if (pfslat) {
+                    Print (", ");
+                }
+            }
+            if (pfslat) {
+                Print ("SLAT");
+            }
+        }
+
         PrintNewline ();
+
+        if (hVmKey != NULL) {
+            PrintRsrc (0x36);
+            PrintValueFromRegistry (hVmKey, "PhysicalHostName"); // "PhysicalHostNameFullyQualified"
+            PrintNewline ();
+            PrintRsrc (0x34);
+            PrintValueFromRegistry (hVmKey, "VirtualMachineName");
+            PrintNewline ();
+            PrintRsrc (0x35);
+            PrintValueFromRegistry (hVmKey, "VirtualMachineId");
+            PrintNewline ();
+
+            if (!raz) {
+                PrintRsrc (4);
+                PrintRsrc (0x37);
+                PrintValueFromRegistry (hVmKey, "HypervisorMajorVersion");
+                PrintValueFromRegistry (hVmKey, "HypervisorMinorVersion", '.');
+                PrintValueFromRegistry (hVmKey, "HypervisorBuildNumber", '.');
+                PrintValueFromRegistry (hVmKey, "HypervisorServiceNumber", '.');
+                PrintRsrc (0x38);
+                PrintValueFromRegistry (hVmKey, "HypervisorServicePack");
+                PrintRsrc (0x39);
+                PrintValueFromRegistry (hVmKey, "HypervisorServiceBranch");
+                PrintNewline ();
+            }
+        }
+
+#ifndef _M_ARM64
+        if (raz) {
+            if (raz == 2) {
+                PrintRsrc (4);
+            }
+            PrintRsrc (0x37);
+            PrintNumber (info.MajorVersion);
+            Print ('.');
+            PrintNumber (info.MinorVersion);
+            Print ('.');
+            PrintNumber (info.BuildNumber);
+            Print ('.');
+            PrintNumber (info.ServiceNumber);
+            PrintRsrc (0x38);
+            PrintNumber (info.ServicePack);
+            PrintRsrc (0x39);
+            PrintNumber (info.ServiceBranch);
+            PrintNewline ();
+        }
+#endif
     } else {
-#ifdef _M_ARM64
-        PrintRsrc (0x34);
-        PrintNewline ();
-#endif
+        PrintRsrc (0x31);
+    }
+}
+
+void PrintIsolationInfo () {
+    if (auto hKernelBase = GetModuleHandleA ("KERNELBASE")) {
+        bool isolated = false;
+        bool container = false;
+
+        BOOLEAN (WINAPI * ptrWTSIsServerContainer) ();
+        if (Windows::Symbol (hKernelBase, ptrWTSIsServerContainer, "WTSIsServerContainer")) {
+            if (ptrWTSIsServerContainer ()) {
+                container = true;
+            }
+        }
+
+        DWORD (WINAPI * ptrWTSGetServiceSessionId) ();
+        if (Windows::Symbol (hKernelBase, ptrWTSGetServiceSessionId, "WTSGetServiceSessionId")) {
+            if (ptrWTSGetServiceSessionId () != 0) {
+                isolated = true;
+            }
+        }
+
+        if (isolated || container) {
+            PrintRsrc (0x3E);
+            if (container) {
+                PrintRsrc (0x3F);
+            }
+            PrintNewline ();
+        }
     }
 }
 
