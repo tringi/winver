@@ -45,15 +45,18 @@ Command-line parameters added to display additional information:
 
 * `-a` displays ALL additional informations
 * `-b` displays full build string, e.g.: `14393.6611.amd64fre.rs1_release.231218-1733`
+* `-h` displays virtualization status and some hypervisor info
 * `-l` displays expiration/licensing/activation status
+* `-n` displays installed languages
 * `-o` displays *Licensed to User/Organization* information, just like winver.exe
 * `-i` displays supported architectures and whether they are native, emulated or WoW64
 * `-u` displays uptime, e.g.: `Uptime: 1y 123d 23:01:59`
 
 ## Requirements
 
-* Windows 2000
+* Windows NT4
 
-## Notes
+## Notes and limitations
 
 * In console output, Release ID (23H2) is highlighted, and 10.0 is darker color (not significant anymore).
+* Non-native builds on ARM64 may fail to report on virtualization properly
