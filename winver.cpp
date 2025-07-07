@@ -51,7 +51,7 @@ bool ShowBrandingFromAPI ();
 void ShowVersionNumbers ();
 bool PrintValueFromRegistry (const char * value, char prefix = 0);
 bool PrintValueFromRegistry (HKEY hKey, const char * value, char prefix = 0);
-void PrintUserInformation ();
+bool PrintUserInformation ();
 void PrintSupportedLanguages ();
 void PrintSupportedArchitectures ();
 void PrintOsArchitecture ();
@@ -215,8 +215,9 @@ __declspec (noreturn) void main () {
     //  - Licensed to: \n User name \n Company name
 
     if (IsOptionPresent (L'o')) {
-        PrintUserInformation ();
-        PrintNewline ();
+        if (PrintUserInformation ()) {
+            PrintNewline ();
+        }
     }
 
     // winver.com -n
@@ -328,7 +329,7 @@ bool PrintValueFromRegistry (const char * avalue, char prefix) {
     return PrintValueFromRegistry (hKey, avalue, prefix);
 }
 
-void PrintUserInformation () {
+bool PrintUserInformation () {
     if (hKey) {
         wchar_t owner [512];
         wchar_t organization [512];
@@ -350,8 +351,10 @@ void PrintUserInformation () {
                 Print (organization, norganization);
                 PrintNewline ();
             }
+            return true;
         }
     }
+    return false;
 }
 
 template <typename T>
@@ -1021,7 +1024,7 @@ void PrintHypervisorInfo () {
 
 #ifndef _M_ARM64
         if (raz) {
-            if (raz == 2) {
+            if (hVmKey != NULL) {
                 PrintRsrc (4);
             }
             PrintRsrc (0x37);
