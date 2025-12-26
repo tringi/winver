@@ -2,8 +2,10 @@ EXPORTS
 	__wgetmainargs
 	_snwprintf
 	_snprintf
+	strcat
 	wcslen
 	wcscmp
+	wcscat
 	wcscpy
 	wcschr
 	wcsncpy

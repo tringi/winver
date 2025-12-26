@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <winevt.h>
 #include <slpublic.h>
 #include <intrin.h>
 
@@ -8,7 +9,9 @@
 
 #include "lib/Windows_Symbol.hpp"
 
-#pragma warning(disable: 28159)
+#pragma warning(disable: 4326) // main should return int, not void
+#pragma warning(disable: 4996) // GetVersionEx is deprecated
+#pragma warning(disable: 28159) // GetVersionEx is deprecated
 
 void Print (wchar_t c);
 void Print (const wchar_t * text);
@@ -22,6 +25,7 @@ template <typename T>
 void PrintNumber (T number) { PrintNumber (number, 10, 0); };
 void PrintElapse (std::uint64_t value, bool seconds);
 void InitPrint ();
+bool InitEvtAPI ();
 void InitArguments ();
 UCHAR GetConsoleColors ();
 void SetTextColor (unsigned char);
@@ -57,6 +61,8 @@ void PrintSupportedArchitectures ();
 void PrintOsArchitecture ();
 void PrintLicenseStatus ();
 void PrintExpiration ();
+bool PrintSecureKernel ();
+bool PrintSecureBoot ();
 void PrintIsolationInfo ();
 void PrintHypervisorInfo ();
 
@@ -167,6 +173,8 @@ __declspec (noreturn) void main () {
 #endif
     }
 
+    bool extraNL = false;
+
     // winver.com -b
     //  - 14393.6611.amd64fre.rs1_release.231218-1733
 
@@ -174,9 +182,25 @@ __declspec (noreturn) void main () {
         SetTextColor (8);
         if (PrintValueFromRegistry ("BuildLabEx") || PrintValueFromRegistry ("BuildLab")) {
             PrintNewline ();
-            PrintNewline ();
+            extraNL = true;
         }
         ResetTextColor ();
+    }
+
+    // winver.com -s
+    //  - Secure Kernel
+
+    if (IsOptionPresent (L's')) {
+        if (PrintSecureKernel ()) {
+            extraNL = true;
+        }
+    }
+
+    if (extraNL) {
+        extraNL = false;
+        if (IsOptionPresent (L'a')) {
+            PrintNewline ();
+        }
     }
 
     // winver.com -u
@@ -232,6 +256,19 @@ __declspec (noreturn) void main () {
 
     if (IsOptionPresent (L'i')) {
         PrintSupportedArchitectures ();
+    }
+
+    // winver.com -s
+    //  - Secure Boot
+
+    if (IsOptionPresent (L's')) {
+        if (!PrintSecureBoot () && (major >= 6)) {
+            PrintRsrc (0x52);
+            SetTextColor (14);
+            PrintRsrc (0x53);
+            ResetTextColor ();
+            PrintNewline ();
+        }
     }
 
     // winver.com -h
@@ -379,28 +416,46 @@ void PrintNumber (T number, int base, int digits) {
     }
 }
 
-UINT GetFileBuildNumber (const char * filename) {
+BOOL (APIENTRY * ptrGetFileVersionInfoA) (_In_ LPCSTR, _Reserved_ DWORD, _In_ DWORD, _Out_writes_bytes_ (dwLen) LPVOID) = NULL;
+BOOL (APIENTRY * ptrVerQueryValueA) (_In_ LPCVOID, _In_ LPCSTR, LPVOID *, _Out_ PUINT) = NULL;
+
+bool InitVersionAPI () {
+    if (ptrVerQueryValueA)
+        return true;
+
+    if (auto hVersionDLL = LoadLibraryA ("VERSION");
+           Windows::Symbol (hVersionDLL, ptrGetFileVersionInfoA, "GetFileVersionInfoA")
+        && Windows::Symbol (hVersionDLL, ptrVerQueryValueA, "VerQueryValueA")) {
+
+        return true;
+    } else
+        return false;
+}
+
+bool GetFileFixedVersionInfo (const char * filename, VS_FIXEDFILEINFO * result) {
     static char data [3072];
-    if (auto hVersionDLL = LoadLibraryA ("VERSION")) {
 
-        BOOL (APIENTRY * ptrGetFileVersionInfoA) (_In_ LPCSTR, _Reserved_ DWORD, _In_ DWORD dwLen, _Out_writes_bytes_ (dwLen) LPVOID) = NULL;
-        BOOL (APIENTRY * ptrVerQueryValueA) (_In_ LPCVOID, _In_ LPCSTR, LPVOID * lplpBuffer, _Out_ PUINT puLen) = NULL;
+    if (InitVersionAPI ()) {
+        if (ptrGetFileVersionInfoA (filename, 0, sizeof data, data)) {
 
-        if (Windows::Symbol (hVersionDLL, ptrGetFileVersionInfoA, "GetFileVersionInfoA")) {
-            if (ptrGetFileVersionInfoA (filename, 0, sizeof data, data)) {
+            VS_FIXEDFILEINFO * info = NULL;
+            UINT infolen = sizeof info;
 
-                VS_FIXEDFILEINFO * info = NULL;
-                UINT infolen = sizeof info;
-
-                if (Windows::Symbol (hVersionDLL, ptrVerQueryValueA, "VerQueryValueA")) {
-                    if (ptrVerQueryValueA (data, "\\", (LPVOID *) &info, &infolen)) {
-                        return LOWORD (info->dwProductVersionLS);
-                    }
-                }
+            if (ptrVerQueryValueA (data, "\\", (LPVOID *) &info, &infolen)) {
+                memcpy (result, info, sizeof (VS_FIXEDFILEINFO));
+                return true;
             }
         }
     }
     return 0;
+}
+
+UINT GetFileBuildNumber (const char * filename) {
+    VS_FIXEDFILEINFO info;
+    if (GetFileFixedVersionInfo (filename, &info)) {
+        return LOWORD (info.dwProductVersionLS);
+    } else
+        return 0;
 }
 
 void ShowVersionNumbersBase (DWORD m, DWORD n, DWORD b) {
@@ -446,6 +501,119 @@ void ShowVersionNumbers () {
         }
 #endif
     }
+}
+
+ULONGLONG ftBootTime = 0;
+
+EVT_HANDLE (WINAPI * ptrEvtQuery) (_In_opt_ EVT_HANDLE, _In_opt_z_ LPCWSTR, _In_opt_z_ LPCWSTR, DWORD) = NULL;
+EVT_HANDLE (WINAPI * ptrEvtCreateRenderContext) (DWORD, LPCWSTR *, DWORD) = NULL;
+BOOL (WINAPI * ptrEvtClose) (_In_ _Post_invalid_ EVT_HANDLE) = NULL;
+BOOL (WINAPI * ptrEvtNext) (_In_ EVT_HANDLE, DWORD, PEVT_HANDLE, DWORD, DWORD, PDWORD) = NULL;
+BOOL (WINAPI * ptrEvtRender) (_In_opt_ EVT_HANDLE, _In_ EVT_HANDLE, DWORD, DWORD, PVOID, _Out_ PDWORD, _Out_ PDWORD) = NULL;
+
+template <typename T>
+bool QueryEvtValue (const char * provider, unsigned int event, const char * name, T * out);
+
+bool InitEvtAPI () {
+    if (ptrEvtCreateRenderContext)
+        return true;
+
+    if (auto hEvtDLL = LoadLibraryA ("WEVTAPI");
+           Windows::Symbol (hEvtDLL, ptrEvtQuery, "EvtQuery")
+        && Windows::Symbol (hEvtDLL, ptrEvtClose, "EvtClose")
+        && Windows::Symbol (hEvtDLL, ptrEvtNext,  "EvtNext")
+        && Windows::Symbol (hEvtDLL, ptrEvtRender,"EvtRender")
+        && Windows::Symbol (hEvtDLL, ptrEvtCreateRenderContext, "EvtCreateRenderContext")) {
+
+        QueryEvtValue ("Kernel-General", 12, "StartTime", &ftBootTime);
+        return true;
+    } else
+        return false;
+}
+
+template <typename T>
+bool GetEvtValue (EVT_HANDLE hEvent, const wchar_t * query, T * value) {
+    bool result = false;
+    if (auto hContext = ptrEvtCreateRenderContext (1, &query, EvtRenderContextValues)) {
+
+        DWORD n = 0;
+        DWORD wtn = 0;
+        EVT_VARIANT variant;
+
+        if (ptrEvtRender (hContext, hEvent, EvtRenderEventValues, sizeof variant, &variant, &wtn, &n) && (n != 0)) {
+
+            result = true;
+            switch (variant.Type) {
+                default:
+                    result = false;
+                    break;
+
+                case EvtVarTypeBoolean: *value = (T) variant.BooleanVal; break;
+
+                case EvtVarTypeSByte: *value = (T) variant.SByteVal; break;
+                case EvtVarTypeInt16: *value = (T) variant.Int16Val; break;
+                case EvtVarTypeInt32: *value = (T) variant.Int32Val; break;
+                case EvtVarTypeInt64: *value = (T) variant.Int64Val; break;
+
+                case EvtVarTypeByte: *value = (T) variant.ByteVal; break;
+                case EvtVarTypeUInt16: *value = (T) variant.UInt16Val; break;
+                case EvtVarTypeUInt32: *value = (T) variant.UInt32Val; break;
+                case EvtVarTypeUInt64: *value = (T) variant.UInt64Val; break;
+                
+                case EvtVarTypeHexInt32: *value = (T) variant.Int32Val; break;
+                case EvtVarTypeHexInt64: *value = (T) variant.Int64Val; break;
+
+                case EvtVarTypeFileTime:
+                    if constexpr (std::is_same_v <T, FILETIME> || std::is_same_v <T, ULONGLONG>) {
+                        memcpy (value, &variant.FileTimeVal, sizeof (FILETIME));
+                    } else {
+                        result = false;
+                    }
+                    break;
+            }
+        }
+        ptrEvtClose (hContext);
+    }
+    return result;
+}
+
+bool BuildEvtQuery (const char * provider, unsigned int event, wchar_t * buffer, std::size_t length) {
+    return _snwprintf (buffer, length, L"Event/System[EventID=%u and Provider[@Name=\"Microsoft-Windows-%S\"]]", event, provider) > 0;
+}
+bool BuildEvtDataNameXPath (const char * name, wchar_t * buffer, std::size_t length) {
+    return _snwprintf (buffer, length, L"Event/EventData/Data[@Name=\"%S\"]", name);
+}
+
+template <typename T>
+bool QueryEvtValue (const char * provider, unsigned int event, const char * name, T * out) {
+
+    bool result = false;
+    if (InitEvtAPI ()) {
+
+        wchar_t query [128];
+        BuildEvtQuery (provider, event, query, sizeof query / sizeof query [0]);
+
+        if (auto hResult = ptrEvtQuery (NULL, L"System", query, EvtQueryChannelPath | EvtQueryReverseDirection)) {
+            DWORD n = 0;
+            EVT_HANDLE hEvent;
+
+            if (ptrEvtNext (hResult, 1, &hEvent, INFINITE, 0, &n) && n) {
+
+                ULONGLONG t = 0;
+                if (ftBootTime) {
+                    GetEvtValue (hEvent, L"Event/System/TimeCreated/@SystemTime", &t);
+                }
+                if (t >= ftBootTime) {
+                    wchar_t path [96];
+                    BuildEvtDataNameXPath (name, path, sizeof path / sizeof path [0]);
+                    result = GetEvtValue (hEvent, path, out);
+                }
+                ptrEvtClose (hEvent);
+            }
+            ptrEvtClose (hResult);
+        }
+    }
+    return result;
 }
 
 #ifndef _M_ARM64
@@ -1022,6 +1190,20 @@ void PrintHypervisorInfo () {
             }
         }
 
+        DWORD type = ~0;
+        if (QueryEvtValue ("Hyper-V-Hypervisor", 2, "SchedulerType", &type)) {
+            if (hVmKey != NULL) {
+                PrintRsrc (4);
+            }
+            PrintRsrc (0x40);
+            if (type >= 1 && type <= 4) {
+                PrintRsrc (0x40 + type);
+            } else {
+                PrintNumber (type);
+            }
+            PrintNewline ();
+        }
+
 #ifndef _M_ARM64
         if (raz) {
             if (hVmKey != NULL) {
@@ -1045,6 +1227,65 @@ void PrintHypervisorInfo () {
     } else {
         PrintRsrc (0x31);
     }
+}
+
+bool PrintSecureKernel () {
+    char path [MAX_PATH + 18];
+    if (GetSystemDirectoryA (path, MAX_PATH)) {
+        strcat (path, "\\SecureKernel.exe");
+
+        VS_FIXEDFILEINFO info;
+        if (GetFileFixedVersionInfo (path, &info)) {
+
+            DWORD status = ~0;
+            QueryEvtValue ("IsolatedUserMode", 3, "Status", &status);
+
+            if (status == 0) {
+                SetTextColor (10);
+            }
+            PrintRsrc (0x50); // TODO: read description from EXE instead
+            ShowVersionNumbersBase (HIWORD (info.dwProductVersionMS), LOWORD (info.dwProductVersionMS), HIWORD (info.dwProductVersionLS));
+            Print (L'.');
+            PrintNumber (LOWORD (info.dwProductVersionLS));
+
+            if (status != 0) {
+                SetTextColor (14);
+                PrintRsrc (0x51);
+                ResetTextColor ();
+            }
+
+            PrintNewline ();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PrintSecureBoot () {
+    HKEY hSecureBootKey = NULL;
+    DWORD dwRegFlags = KEY_QUERY_VALUE;
+#ifndef _WIN64
+    if (major > 5 || (major == 5 && minor >= 2)) {
+        dwRegFlags |= KEY_WOW64_64KEY;
+    }
+#endif
+    if (RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SYSTEM\\CurrentControlSet\\Control\\SecureBoot\\State", 0, dwRegFlags, &hSecureBootKey) == ERROR_SUCCESS) {
+        DWORD value = 0;
+        DWORD size = sizeof value;
+        if (RegQueryValueExA (hSecureBootKey, "UEFISecureBootEnabled", NULL, NULL, (LPBYTE) &value, &size) == ERROR_SUCCESS) {
+            PrintRsrc (0x52);
+            SetTextColor (value ? 10 : 14);
+            PrintRsrc (value ? 0x55 : 0x54);
+            ResetTextColor ();
+            PrintNewline ();
+            return true;
+        }
+    }
+
+    // TODO: QueryEvtValue ("Kernel-Boot", 153, "EnableDisableReason", ...);
+    // TODO: QueryEvtValue ("Kernel-Boot", 153, "VsmPolicy", ...);
+
+    return false;
 }
 
 void PrintIsolationInfo () {

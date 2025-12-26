@@ -45,4 +45,18 @@ BEGIN
     0x3B "Guest"
     0x3E "Isolated session"
     0x3F " (server container)"
+    
+    // https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/manage/manage-hyper-v-scheduler-types#determine-the-current-scheduler-type
+    0x40 "Scheduler Type: "
+    0x41 "Classic (SMT disabled)"
+    0x42 "Classic"
+    0x43 "Core"
+    0x44 "Root"
+
+    0x50 "Secure Kernel "
+    0x51 " (not enabled)"
+    0x52 "Secure Boot: "
+    0x53 "Not supported"
+    0x54 "Disabled"
+    0x55 "Enabled"
 END
