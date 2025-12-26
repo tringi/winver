@@ -46,6 +46,7 @@ Command-line parameters added to display additional information:
 * `-a` displays ALL additional informations
 * `-b` displays full build string, e.g.: `14393.6611.amd64fre.rs1_release.231218-1733`
 * `-h` displays virtualization status and some hypervisor info
+* `-s` displays Secure Kernel version and Secure Boot status
 * `-l` displays expiration/licensing/activation status
 * `-n` displays installed languages
 * `-o` displays *Licensed to User/Organization* information, just like winver.exe
