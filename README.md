@@ -40,6 +40,11 @@ While regular `ver` shows just this bland:
     Hyper-V Server 2016 [Version 1607 10.0.14393.6529] 64-bit
     Azure Stack HCI [Version 23H2 10.0.25398.584] 64-bit
 
+With `-a` parameter it displays all possible information:  
+(see [/img](/img) directory for more examples)
+
+![See example screenshots in img directory](/img/overview.png?raw=true "Example screenshots from different systems")
+
 Command-line parameters added to display additional information:  
 *may be passed both distinct `-l -o` or stacked `-lo`*
 
