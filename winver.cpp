@@ -94,7 +94,7 @@ void InitVersionNumbers () {
 
 // Entry Point
 
-__declspec (noreturn) void main () {
+__declspec (noreturn) void __stdcall main (void *) {
     InitPrint ();
     InitArguments ();
     InitVersionNumbers ();
@@ -638,6 +638,9 @@ void PrintOsArchitecture () {
                 case IMAGE_FILE_MACHINE_ARM64:
                     Print ("ARM-64");
                     break;
+                // case IMAGE_FILE_MACHINE_IA64:
+                //    Print ("IA-64");
+                //    break;
             }
             return;
         }
@@ -651,6 +654,19 @@ void PrintOsArchitecture () {
     BOOL (WINAPI * ptrIsWow64Process) (HANDLE, BOOL *) = NULL;
     if (Windows::Symbol (hKernel32, ptrIsWow64Process, "IsWow64Process")) {
         if (ptrIsWow64Process ((HANDLE) -1, &wow) && wow) {
+
+            VOID (WINAPI * ptrGetNativeSystemInfo) (LPSYSTEM_INFO) = NULL;
+            if (Windows::Symbol (hKernel32, ptrGetNativeSystemInfo, "GetNativeSystemInfo")) {
+
+                SYSTEM_INFO info;
+                ptrGetNativeSystemInfo (&info);
+                if (info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_IA64 || info.dwProcessorType == PROCESSOR_INTEL_IA64) {
+                    Print ("IA-64");
+                    native = IMAGE_FILE_MACHINE_IA64;
+                    return;
+                }
+            }
+
             Print ("64-bit");
             native = IMAGE_FILE_MACHINE_AMD64;
             return;
