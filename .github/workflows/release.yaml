@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x86
+            outdir: Win32
+            arch: x86
+          - platform: x64
+            outdir: x64
+            arch: amd64
+          - platform: ARM64
+            outdir: ARM64
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Detect installed MSVC toolset and Windows SDK
+        id: env
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $tools = Get-ChildItem "$vs\VC\Tools\MSVC" -Directory |
+                   Sort-Object Name -Descending |
+                   Select-Object -First 1 -ExpandProperty Name
+          $sdk = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Include" -Directory |
+                 Where-Object { $_.Name -match '^10\.' } |
+                 Sort-Object Name -Descending |
+                 Select-Object -First 1 -ExpandProperty Name
+          "tools=$tools" >> $env:GITHUB_OUTPUT
+          "sdk=$sdk" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        shell: cmd
+        run: >-
+          msbuild winver.sln
+          /p:Configuration=Release
+          /p:Platform=${{ matrix.platform }}
+          /p:VCToolsVersion=${{ steps.env.outputs.tools }}
+          /p:WindowsTargetPlatformVersion=${{ steps.env.outputs.sdk }}
+          /m /nologo
+
+      - name: Stage binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staged | Out-Null
+          Copy-Item "bin\${{ matrix.outdir }}\Release\winver.com" "staged\winver-${{ matrix.arch }}.com"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winver-${{ matrix.arch }}
+          path: staged/winver-${{ matrix.arch }}.com
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.com
+          generate_release_notes: true
